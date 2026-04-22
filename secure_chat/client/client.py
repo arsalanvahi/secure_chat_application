@@ -86,12 +86,84 @@ class ConnectionSettingsManager:
         self.readiness_for_reconnect = False
         return False
 
+class ClientSessionManager:
+    def __init__(self):
+        self.connected = False
+        self.authenticated = False
+        self.channel_ready = False
+        self.channel_unavailable = False
+        self.send_ready = False
+        self.receive_ready = False
+        self.current_username = None
+        self.current_server_endpoint_summary = None
+    def get_connection_state(self):
+        pass
+    def set_connection_state(self):
+        pass
+    def get_authentication_state(self):
+        pass
+    def set_authentication_state(self):
+        pass
+    def set_channel_readiness(self):
+        pass
+    def check_send_readiness(self):
+        pass
+    def check_receive_readiness(self):
+        pass
+    def get_overall_session_state(self):
+        pass
+    def reset_session_state(self):
+        pass
+    def notify_state_change(self):
+        pass
+class ChannelKeyStore:
+    def __init__(self):
+        self.aes_key = None
+        self.iv = None
+        self.hmac_key = None
+        self.keys_loaded = False
+    def stor_channel_keys(self):
+        pass
+    def retrieve_channel_keys(self):
+        pass
+    def check_key_availability(self):
+        pass
+    def clear_channel_keys(self):
+        pass
+
+    
+
 
 
 # =========================================
 # 3. Security
 # =========================================
-
+class ClientCryptoServer:
+    def __init__(self):
+        self.server_encryption_public_keys = None
+        self.server_signature_verification_public_keys = None
+        self.crypto_readiness_status = False
+    def load_server_public_keys(self,PublicKeySet):
+        self.server_encryption_public_keys = PublicKeySet
+    def derive_enrollment_values_from_password(self):
+        pass
+    def derive_authentication_key_from_password(self):
+        pass
+    def derive_response_decryption_material_from_password(self):
+        pass
+    def encrypt_registration_request(self):
+        pass
+    def encrypt_secure_message(self):
+        pass
+    def compute_integrity_value(self):
+        pass
+    def verify_integrity_value(self):
+        pass
+    def verify_digital_signature(self):
+        pass
+    def decrypt_protected_response(self):
+        pass
+    def decrypt_incoming_message(self,):
 # =========================================
 # 4. Transport/Protocol Layer
 # =========================================
@@ -137,7 +209,7 @@ class ClientConnectionManager:
         pass
     def notify_disconnect(self):
         pass
-    
+
 
 # =========================================
 # 5. Application / Workflow Logic
