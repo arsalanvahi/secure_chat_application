@@ -10,6 +10,17 @@
 # =========================================
 # 3. Persistence
 # =========================================
+class EnrollmentRepository:
+    def __init__(self):
+        self.enrollment_records = None
+        self.persistent_stor_handle = None
+    def save_enrollment_records(self):
+        pass
+    def retrieve_enrollment_record_by_username(self):
+        pass
+    def check_whether_username_exists(self):
+        pass
+
 
 # =========================================
 # 4. Runtime State
@@ -42,7 +53,30 @@ class ServeSessionManager:
         pass
     def clear_all_sessions(self):
         pass
-    
+
+class ServerRuntimeContex:
+    def __init__(self):
+        self.lifecycle_state_snapshot = None
+        self.active_runtime_structure_registry = None
+        self.channel_availability_snapshot = None
+        self.monitoring_snapshot = None
+        self.retry_recovery_flags = None
+    def get_lifecycle_state(self):
+        pass
+    def set_lifecycle_state(self):
+        pass
+    def register_runtime_structure(self):
+        pass
+    def retrieve_runtime_structure(self):
+        pass
+    def set_channel_availability(self):
+        pass
+    def get_channel_availability(self):
+        pass
+    def clear_runtime_state(self):
+        pass
+    def snapshot_monitoring_state(self):
+        pass
 
 # =========================================
 # 5. Security
