@@ -26,6 +26,23 @@
 # =========================================
 # 7. Application / Service Logic
 # =========================================
+class ServerAppCoordinator:
+    def __init__(self):
+        self.current_administrative_workflow_context = None
+        self.pending_admin_operation = None
+        self.last_admin_action_result = None
+    def start_server(self):
+        pass
+    def stop_server(self):
+        pass
+    def trigger_channel_key_generation(self):
+        pass
+    def open_connected_clients_monitor(self):
+        pass
+    def open_channel_traffic_monitor(self):
+        pass
+    def get_server_status(self):
+        pass
 
 # =========================================
 # 8. Monitoring

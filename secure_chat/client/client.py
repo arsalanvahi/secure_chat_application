@@ -131,7 +131,7 @@ class ChannelKeyStore:
     def clear_channel_keys(self):
         pass
 
-    
+
 
 
 
@@ -164,6 +164,7 @@ class ClientCryptoServer:
     def decrypt_protected_response(self):
         pass
     def decrypt_incoming_message(self,):
+        pass
 # =========================================
 # 4. Transport/Protocol Layer
 # =========================================
