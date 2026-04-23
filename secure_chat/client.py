@@ -75,28 +75,88 @@ class ClientAppCoordinator:
         pass
     def route_user_action_to_target_workflow(self):
         pass
+
+
+
 class RegistrationController:
     def __init__(self):
         self.pending_registration_input = None
-        self.registration_in_progress = None
+        self.registration_in_progress = False
         self.last_registration_result = None
         self. last_registration_error = None
-    def start_registration(self):
-        pass
+    def start_registration(self,server_ip, server_port, username, password,selected_channel):
+        self.pending_registration_input = RegistrationInput(
+            server_ip = server_ip,
+            server_port=server_port,
+            username=username,
+            password=password,
+            selected_channel=selected_channel,
+        )
+
     def validate_registration_input(self):
-        pass
+        if self.pending_registration_input is None:
+            self.last_registration_error = "No registration input provided"
+            return False
+        if self.pending_registration_input.username == "":
+            self.last_registration_error = "username is empty"
+            return False
+        if self.pending_registration_input.password == "":
+            self.last_registration_error = "password is empty"
+            return False
+        if self.pending_registration_input.selected_channel == "":
+            self.last_registration_error = "channel name is empty"
+
+        return True
+
+
     def prepare_registration_payload(self):
-        pass
+        if self.pending_registration_input is None:
+            self.last_registration_error = "No registration input valid"
+            return None
+        derived_values = ClientCryptoService.derive_enrollment_values_from_password(self.pending_registration_input.password)
+
+
+        payload = RegistrationPayload(
+            username=self.pending_registration_input.username,
+            password_hash=derived_values["password_hash"],
+            reversed_password_hash=derived_values["reversed_password_hash"],
+            selected_channel=self.pending_registration_input.selected_channel
+
+
+        )
+        return payload
     def submit_registration_request(self):
         pass
-    def handle_registration_response(self):
-        pass
+    def handle_registration_response(self,response_message):
+        if response_message is None:
+            self.last_registration_error = "No Registration Response"
+            return False
+        if response_message.result_code == "success":
+            self.last_registration_result = RegistrationResult(
+                success=True,
+                message=response_message.result_message,
+                retry_possible=False
+
+
+            )
+            return True
+        self.last_registration_result = RegistrationResult(
+            success=False,
+            message=response_message.result_message,
+            retry_possible=True
+        )
+        return False
+
     def complete_registration(self):
         pass
     def retry_registration(self):
         pass
     def abort_registration(self):
         pass
+
+
+
+
 class AuthenticationController:
     def __init__(self):
         self.pending_username = None
