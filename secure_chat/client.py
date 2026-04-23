@@ -1,4 +1,5 @@
 #client.py should be organized in this order
+import hashlib
 from dataclasses import dataclass
 # =========================================
 #Imports from server.py (shared/common structures only)
@@ -33,6 +34,8 @@ class ConnectionSettings:
     readiness_for_authentication:bool=False
     readiness_for_reconnect:bool=False
 
+@dataclass
+class PublicKeySet:
 
 
 # =========================================
@@ -159,7 +162,7 @@ class IncomingMessageProcessor:
     def record_receive_failure(self):
         pass
 
-class Disconnet_controller:
+class DisconnectController:
     def __init__(self):
         self.disconnect_in_progress = False
         self.pending_cleanup_status = False
@@ -229,32 +232,45 @@ class ClientConnectionManager:
 # =========================================
 # 4. Security
 # =========================================
-class ClientCryptoServer:
+class ClientCryptoService:
     def __init__(self):
         self.server_encryption_public_keys = None
         self.server_signature_verification_public_keys = None
         self.crypto_readiness_status = False
-    def load_server_public_keys(self,PublicKeySet):
-        self.server_encryption_public_keys = PublicKeySet
-    def derive_enrollment_values_from_password(self):
+    def load_server_public_keys(self,public_key_set):
+        self.server_encryption_public_keys = public_key_set
+        self.server_signature_verification_public_keys = public_key_set
+        self.crypto_readiness_status = True
+    def derive_enrollment_values_from_password(self,password):
+        password_bytes = password.encode("utf-8")
+        reversed_password_bytes = password[::-1].encode("utf-8")
+
+        password_hash= hashlib.sha3_512(password_bytes).digest()
+        reversed_password_hash = hashlib.sha3_512(reversed_password_bytes).digest()
+
+        return {
+            "password_hash":password_hash,
+            "reversed_password_hash":reversed_password_hash
+        }
+    def derive_authentication_key_from_password(self,password):
         pass
-    def derive_authentication_key_from_password(self):
+    def derive_response_decryption_material_from_password(self,password):
         pass
-    def derive_response_decryption_material_from_password(self):
+    def encrypt_registration_request(self,registration_payload):
+        payload_text = (
+
+        )
+    def encrypt_secure_message(self,message):
         pass
-    def encrypt_registration_request(self):
+    def compute_integrity_value(self,value):
         pass
-    def encrypt_secure_message(self):
+    def verify_integrity_value(self,value,expected_value):
+        return value==expected_value
+    def verify_digital_signature(self,signature):
         pass
-    def compute_integrity_value(self):
+    def decrypt_protected_response(self,response):
         pass
-    def verify_integrity_value(self):
-        pass
-    def verify_digital_signature(self):
-        pass
-    def decrypt_protected_response(self):
-        pass
-    def decrypt_incoming_message(self,):
+    def decrypt_incoming_message(self,message):
         pass
 
 
