@@ -1,5 +1,5 @@
 #client.py should be organized in this order
-
+from dataclasses import dataclass
 # =========================================
 #Imports from server.py (shared/common structures only)
 # =========================================
@@ -24,6 +24,14 @@ from server import (
     ChannelKeySet,
 
 )
+@dataclass
+class ConnectionSettings:
+    server_ip:str
+    server_port:int
+    configuration_valid:bool=False
+    readiness_for_registration:bool=False
+    readiness_for_authentication:bool=False
+    readiness_for_reconnect:bool=False
 
 
 
@@ -269,9 +277,9 @@ class ConnectionSettingsManager:
             server_ip = self.server_ip,
             server_port = self.server_port,
             configuration_valid = self.configuration_valid,
-            readiness_for_registeration = self.readiness_for_registration,
+            readiness_for_reconnect = self.readiness_for_registration,
             readiness_for_authentication = self.readiness_for_authentication,
-            readiness_for_reconnect = self.readiness_for_reconnect,
+             readiness_for_registration= self.readiness_for_reconnect,
 
         )
 
@@ -316,6 +324,7 @@ class ConnectionSettingsManager:
         self.readiness_for_reconnect = False
         return False
 
+
 class ClientSessionManager:
     def __init__(self):
         self.connected = False
@@ -327,38 +336,73 @@ class ClientSessionManager:
         self.current_username = None
         self.current_server_endpoint_summary = None
     def get_connection_state(self):
-        pass
-    def set_connection_state(self):
-        pass
+        return self.connected
+    def set_connection_state(self,value):
+        self.connected = value
+
     def get_authentication_state(self):
-        pass
-    def set_authentication_state(self):
-        pass
-    def set_channel_readiness(self):
-        pass
+        return self.authenticated
+    def set_authentication_state(self,value):
+        self.authenticated = value
+    def set_channel_readiness(self,value):
+        self.channel_ready = value
+        self.channel_unavailable = not value
     def check_send_readiness(self):
-        pass
+        return self.channel_ready
     def check_receive_readiness(self):
-        pass
+        return self.receive_ready
     def get_overall_session_state(self):
-        pass
+        return {
+            "connected":self.connected,
+            "authenticated":self.authenticated,
+            "channel_ready":self.channel_ready,
+            "channel_unavailable":self.channel_unavailable,
+            "send_ready":self.send_ready,
+            "receive_ready":self.receive_ready,
+            "current_username":self.current_username,
+            "current_server_endpoint_summary":self.current_server_endpoint_summary,
+        }
     def reset_session_state(self):
-        pass
+        self.connected = False
+        self.authenticated = False
+        self.channel_ready = False
+        self.channel_unavailable = False
+        self.send_ready = False
+        self.receive_ready = False
+        self.current_username = None
+        self.current_server_endpoint_summary = None
     def notify_state_change(self):
         pass
+
 class ChannelKeyStore:
     def __init__(self):
         self.aes_key = None
         self.iv = None
         self.hmac_key = None
         self.keys_loaded = False
-    def stor_channel_keys(self):
-        pass
-    def retrieve_channel_keys(self):
-        pass
+    def store_channel_keys(self,key_set):
+        self.aes_key = key_set.aes_key
+        self.iv = key_set.iv
+        self.hmac_key = key_set.hmac_key
+        self.keys_loaded =  key_set.keys_loaded
+
+    def retrieve_channel_keys(self):#output from this method
+        if not self.keys_loaded:
+            return None
+        return ChannelKeySet(
+            aes_key=self.aes_key,
+            iv=self.iv,
+            hmac_key=self.hmac_key,
+            keys_loaded=self.keys_loaded,
+
+        )
+
     def check_key_availability(self):
-        pass
+        return self.keys_loaded
     def clear_channel_keys(self):
-        pass
+        self.aes_key = None
+        self.iv = None
+        self.hmac_key = None
+        self.keys_loaded = False
 
 
