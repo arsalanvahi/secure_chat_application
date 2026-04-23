@@ -19,6 +19,8 @@ class MessageType(str,Enum):
     MSG_BROADCAST = "MSG_BROADCAST"
     DISCONNECT = "DISCONNECT"
     DISCONNECT_LOST = "DISCONNECT_LOST"
+    CONNECTION_LOST = "CONNECTION_LOST"
+
 
 class AuthStatus(str,Enum):
     SUCCESS = "SUCCESS"
@@ -34,8 +36,8 @@ class ChannelName(str,Enum):
 class RegistrationPayload:
     username:str
     password_hash:bytes
-    reserved_password_hash:bytes
-    selected_channel:str
+    reversed_password_hash:bytes
+    selected_channel:ChannelName
 
 @dataclass
 class RegistrationResult:
@@ -64,7 +66,7 @@ class ChannelKeySet:
 @dataclass
 class RegistrationRequestMessage:
     message_type:MessageType
-    encrypted_payloads:bool=False
+    encrypted_payloads:bytes
 
 @dataclass
 class RegistrationResponseMessage:
@@ -76,7 +78,7 @@ class RegistrationResponseMessage:
 @dataclass
 class AuthenticationRequestMessage:
     message_type:MessageType
-    username = str
+    username:str
 
 @dataclass
 class AuthenticationChallengeMessage:

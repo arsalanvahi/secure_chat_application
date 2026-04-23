@@ -35,7 +35,13 @@ class ConnectionSettings:
     readiness_for_reconnect:bool=False
 
 @dataclass
-class PublicKeySet:
+class RegistrationInput:
+    server_ip:str
+    server_port:int
+    username:str
+    password:str
+    selected_channel:ChannelName
+
 
 
 # =========================================
@@ -253,12 +259,30 @@ class ClientCryptoService:
             "reversed_password_hash":reversed_password_hash
         }
     def derive_authentication_key_from_password(self,password):
-        pass
+        password_bytes = password.encode("utf-8")
+        password_hash = hashlib.sha3_512(password_bytes).digest()
+        hmac_key = password_hash[32:]
+        return hmac_key
     def derive_response_decryption_material_from_password(self,password):
-        pass
-    def encrypt_registration_request(self,registration_payload):
-        payload_text = (
+        reversed_password = password[::-1]
+        reversed_password_bytes = reversed_password.encode("utf-8")
+        reverse_hash = hashlib.sha3_512(reversed_password_bytes).digest()
+        response_decryption_key = reverse_hash[:32]
+        response_decryption_iv = reverse_hash[32:48]
+        return {
+            "response_decryption_key":response_decryption_key,
+            "response_decryption_iv":response_decryption_iv,
+        }
 
+    def encrypt_registration_request(self,RegistrationPayload):
+        payload_text=(
+            RegistrationPayload.username
+            + "|"
+            + RegistrationPayload.password_hash.hex()
+            + "|"
+            + RegistrationPayload.reserved_password_hash.hex()
+            + "|"
+            + RegistrationPayload.selected_channel
         )
     def encrypt_secure_message(self,message):
         pass
@@ -268,7 +292,7 @@ class ClientCryptoService:
         return value==expected_value
     def verify_digital_signature(self,signature):
         pass
-    def decrypt_protected_response(self,response):
+    def decrypt_protected_response(self,protected_response):
         pass
     def decrypt_incoming_message(self,message):
         pass
