@@ -11,8 +11,8 @@ from server import (
     RegistrationRequestMessage,
     RegistrationResponseMessage,
     AuthenticationRequestMessage,
-    AuthenticationResponseMessage,
     AuthenticationChallengeMessage,
+    AuthenticationResponseMessage,
     AuthenticationResultMessage,
     SecureMessagePacket,
     DisconnectMessage,
@@ -22,7 +22,7 @@ from server import (
     AuthenticationChallenge,
     AuthenticationResult,
     ChannelKeySet,
-    ConnectionSettings,
+
 )
 
 
