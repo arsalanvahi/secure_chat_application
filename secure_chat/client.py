@@ -22,7 +22,7 @@ from server import (
     AuthenticationChallenge,
     AuthenticationResult,
     ChannelKeySet,
-    ConnectionSettings,
+
 )
 
 
@@ -63,7 +63,7 @@ class RegistrationController:
         self.pending_registration_input = None
         self.registration_in_progress = None
         self.last_registration_result = None
-        self. last_registration_error = None
+        self.last_registration_error = None
     def start_registration(self):
         pass
     def validate_registration_input(self):
@@ -84,7 +84,7 @@ class AuthenticationController:
     def __init__(self):
         self.pending_username = None
         self.authentication_in_progress = None
-        self.pending_challenges = None
+        self.pending_challenge = None
         self.last_authentication_result = None
         self.last_authentication_error = None
     def start_authentication(self):
@@ -104,7 +104,7 @@ class AuthenticationController:
     def abort_authentication(self):
         pass
 class SecureMessageSender:
-    def __init__(self,current_outgoing_plaintext,current_protected_packet):
+    def __init__(self):
         self.current_outgoing_plaintext = None
         self.current_protected_packet = None
         self.send_in_progress = False
@@ -116,7 +116,7 @@ class SecureMessageSender:
         pass
     def prepare_outgoing_plaintext(self):
         pass
-    def secure_packet(self):
+    def build_secure_packet(self):
         pass
     def send_secure_message(self):
         pass
@@ -151,7 +151,7 @@ class IncomingMessageProcessor:
     def record_receive_failure(self):
         pass
 
-class Disconnet_controller:
+class DisconnectController:
     def __init__(self):
         self.disconnect_in_progress = False
         self.pending_cleanup_status = False
@@ -185,7 +185,7 @@ class ClientConnectionManager:
         self.remote_endpoint_info = None
     def connect_to_server(self,active_socket_handle):
         pass
-    def disconnect_form_server(self,DisconnectMessage):
+    def disconnect_from_server(self,DisconnectMessage):
         pass
     def send_registration_request(self,RegistrationRequestMessage):
         pass
@@ -195,7 +195,7 @@ class ClientConnectionManager:
         pass
     def send_authentication_response(self,AuthenticationResponseMessage):
         pass
-    def secure_packet(self,SecureMessagePacket):
+    def send_secure_packet(self,SecureMessagePacket):
         pass
     def start_receive_loop(self):
         pass
@@ -221,7 +221,7 @@ class ClientConnectionManager:
 # =========================================
 # 4. Security
 # =========================================
-class ClientCryptoServer:
+class ClientCryptoService:
     def __init__(self):
         self.server_encryption_public_keys = None
         self.server_signature_verification_public_keys = None
@@ -352,7 +352,7 @@ class ChannelKeyStore:
         self.iv = None
         self.hmac_key = None
         self.keys_loaded = False
-    def stor_channel_keys(self):
+    def store_channel_keys(self):
         pass
     def retrieve_channel_keys(self):
         pass

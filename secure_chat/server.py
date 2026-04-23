@@ -1,13 +1,114 @@
 #server.py should be organized in this order
+import dataclasses
+from enum import Enum
+from dataclasses import dataclass
+
+
 
 # =========================================
-# Shared / Common Data Structures
+# Shared / Common Data Structures /common Enums, Constants, Message types
 # =========================================
+class MessageType(str,Enum):
+    REG_REQ = "REG_REQ"
+    REG_RES ="REG_RES"
+    AUTH_REQ = "AUTH_REQ"
+    AUTH_CHALLENGE = "AUTH_CHALLENGE"
+    AUTH_RESP = "AUTH_RESP"
+    AUTH_RES = "AUTH_RES"
+    MSG_SEND = "MSG_SEND"
+    MSG_BROADCAST = "MSG_BROADCAST"
+    DISCONNECT = "DISCONNECT"
+    DISCONNECT_LOST = "DISCONNECT_LOST"
 
-# =========================================
-# Shared / Common Enums, Constants, Message Types
-# =========================================
+class AuthStatus(str,Enum):
+    SUCCESS = "SUCCESS"
+    FAILURE = "FAILURE"
+    CHANNEL_UNAVAILABLE = "CHANNEL_UNAVAILABLE"
 
+class ChannelName(str,Enum):
+    IF100 = "IF100"
+    MATH101 = "MATH101"
+    SPS101 = "SPS101"
+
+@dataclass
+class RegistrationPayload:
+    username:str
+    password_hash:bytes
+    reserved_password_hash:bytes
+    selected_channel:str
+
+@dataclass
+class RegistrationResult:
+    success:bool
+    message:str
+    retry_possible:bool=False
+
+@dataclass
+class AuthenticationChallenge:
+    challenge_bytes:bytes
+
+@dataclass
+class AuthenticationResult:
+    status:AuthStatus
+    message:str
+    channel_available:bool
+    channel_keys_loaded:bool=False
+
+@dataclass
+class ChannelKeySet:
+    aes_key:bytes
+    iv:bytes
+    hmac_key:bytes
+    keys_loaded:bool=False
+
+@dataclass
+class RegistrationRequestMessage:
+    message_type:MessageType
+    encrypted_payloads:bool=False
+
+@dataclass
+class RegistrationResponseMessage:
+    message_type:MessageType
+    result_code:str
+    result_message:str
+    signature:bytes
+
+@dataclass
+class AuthenticationRequestMessage:
+    message_type:MessageType
+    username = str
+
+@dataclass
+class AuthenticationChallengeMessage:
+    message_type:MessageType
+    challenge:bytes
+
+@dataclass
+class AuthenticationResponseMessage:
+    message_type:MessageType
+    hmac_response:bytes
+
+@dataclass
+class AuthenticationResultMessage:
+    message_type:MessageType
+    encrypted_result:bytes
+    signature:bytes
+@dataclass
+class SecureMessagePacket:
+    message_type:MessageType
+    ciphertext:bytes
+    hmac:bytes
+
+@dataclass
+class DisconnectMessage:
+    message_type:MessageType
+    reason:str
+
+@dataclass
+class ConnectionLostEvent:
+    message_type:MessageType
+    reason:str
+    details:str=""
 
 # =========================================
 # 1. Server GUI / Presentation
@@ -49,7 +150,7 @@ class RegistrationService:
         pass
     def decrypt_registration_payload(self):
         pass
-    def valid_registration_payload(self):
+    def validate_registration_payload(self):
         pass
     def check_username_availability(self):
         pass
@@ -61,7 +162,7 @@ class RegistrationService:
         pass
     def send_registration_response(self):
         pass
-class AuthenticationServe:
+class AuthenticationService:
     def __init__(self):
         self.current_authentication_request_context = None
         self.current_challenge = None
@@ -71,7 +172,7 @@ class AuthenticationServe:
         pass
     def validate_authentication_eligibility(self):
         pass
-    def generate_authenticate_challenge(self):
+    def generate_authentication_challenge(self):
         pass
     def send_authentication_challenge(self):
         pass
@@ -85,11 +186,11 @@ class AuthenticationServe:
         pass
     def protect_authentication_result(self):
         pass
-    def active_authenticated_session(self):
+    def activate_authenticated_session(self):
         pass
     def send_authentication_result(self):
         pass
-class MessageReplayService:
+class MessageRelayService:
     def __init__(self):
         self.current_relay_context = None
         self.last_relay_result  = None
@@ -159,7 +260,7 @@ class ServerTransportManager:
         pass
     def detect_client_disconnect(self):
         pass
-    def register_transport_handler(self):
+    def register_transport_handlers(self):
         pass
     def open_session(self):
         pass
@@ -239,7 +340,7 @@ class ServerCryptoService:
 # =========================================
 # 6. Runtime State
 # =========================================
-class ServeSessionManager:
+class ServerSessionManager:
     def __init__(self):
         self.active_connections = None
         self.authenticated_sessions = None
@@ -251,7 +352,7 @@ class ServeSessionManager:
         pass
     def remove_connections(self):
         pass
-    def bind_connectio_to_identy(self):
+    def bind_connection_to_identy(self):
         pass
     def mark_session_authenticated(self):
         pass
@@ -268,7 +369,7 @@ class ServeSessionManager:
     def clear_all_sessions(self):
         pass
 
-class ServerRuntimeContex:
+class ServerRuntimeContext:
     def __init__(self):
         self.lifecycle_state_snapshot = None
         self.active_runtime_structure_registry = None
@@ -299,8 +400,8 @@ class ServerRuntimeContex:
 class EnrollmentRepository:
     def __init__(self):
         self.enrollment_records = None
-        self.persistent_stor_handle = None
-    def save_enrollment_records(self):
+        self.persistent_store_handle = None
+    def save_enrollment_record(self):
         pass
     def retrieve_enrollment_record_by_username(self):
         pass
