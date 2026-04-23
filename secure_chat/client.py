@@ -1,8 +1,9 @@
 #client.py should be organized in this order
 
 # =========================================
-# 1. Imports from server.py (shared/common structures only)
+#Imports from server.py (shared/common structures only)
 # =========================================
+
 from server import (
     MessageType,
     AuthStatus,
@@ -23,197 +24,16 @@ from server import (
     ChannelKeySet,
     ConnectionSettings,
 )
-# =========================================
-# 2. Runtime State / Observability
-# =========================================
-class ConnectionSettingsManager:
-    def __init__(self):
-        self.server_ip = ""
-        self.server_port = 0
-        self.configuration_valid = False
-        self.readiness_for_registration = False
-        self.readiness_for_authentication = False
-        self.readiness_for_reconnect = False
-    def load_current_connection_settings(self):
-        return ConnectionSettings(
-            server_ip = self.server_ip,
-            server_port = self.server_port,
-            configuration_valid = self.configuration_valid,
-            readiness_for_registeration = self.readiness_for_registration,
-            readiness_for_authentication = self.readiness_for_authentication,
-            readiness_for_reconnect = self.readiness_for_reconnect,
-
-        )
-
-    def  validate_connection_settings(self):
-        if self.server_ip == "":
-            self.configuration_valid = False
-            return False
-        if self.server_port <= 0:
-            self.configuration_valid = False
-            return False
-        configuration_valid = True
-        return True
-
-
-    def save_connection_settings(self,server_ip, server_port):
-        self.server_ip = server_ip
-        self.server_port  = server_port
-        self.validate_connection_settings()
-
-    def update_connection_settings(self,server_ip,server_port):
-        self.server_ip = server_ip
-        self.server_port = server_port
-        self.validate_connection_settings()
-
-    def  get_current_connection_settings(self):
-        return ConnectionSettings(
-            server_ip = self.server_ip,
-            server_port = self.server_port,
-            configuration_valid = self.configuration_valid,
-            readiness_for_registration = self.readiness_for_registration,
-            readiness_for_authentication = self.readiness_for_authentication,
-            readiness_for_reconnect= self.readiness_for_reconnect,
-        )
-    def determine_connection_readiness(self):
-        if self.configuration_valid:
-            self.readiness_for_registration = True
-            self.readiness_for_authentication = True
-            self.readiness_for_reconnect = True
-            return True
-        self.readiness_for_registration = False
-        self.readiness_for_authentication = False
-        self.readiness_for_reconnect = False
-        return False
-
-class ClientSessionManager:
-    def __init__(self):
-        self.connected = False
-        self.authenticated = False
-        self.channel_ready = False
-        self.channel_unavailable = False
-        self.send_ready = False
-        self.receive_ready = False
-        self.current_username = None
-        self.current_server_endpoint_summary = None
-    def get_connection_state(self):
-        pass
-    def set_connection_state(self):
-        pass
-    def get_authentication_state(self):
-        pass
-    def set_authentication_state(self):
-        pass
-    def set_channel_readiness(self):
-        pass
-    def check_send_readiness(self):
-        pass
-    def check_receive_readiness(self):
-        pass
-    def get_overall_session_state(self):
-        pass
-    def reset_session_state(self):
-        pass
-    def notify_state_change(self):
-        pass
-class ChannelKeyStore:
-    def __init__(self):
-        self.aes_key = None
-        self.iv = None
-        self.hmac_key = None
-        self.keys_loaded = False
-    def stor_channel_keys(self):
-        pass
-    def retrieve_channel_keys(self):
-        pass
-    def check_key_availability(self):
-        pass
-    def clear_channel_keys(self):
-        pass
-
-
 
 
 
 # =========================================
-# 3. Security
+# 1. Client GUI / Presentation
 # =========================================
-class ClientCryptoServer:
-    def __init__(self):
-        self.server_encryption_public_keys = None
-        self.server_signature_verification_public_keys = None
-        self.crypto_readiness_status = False
-    def load_server_public_keys(self,PublicKeySet):
-        self.server_encryption_public_keys = PublicKeySet
-    def derive_enrollment_values_from_password(self):
-        pass
-    def derive_authentication_key_from_password(self):
-        pass
-    def derive_response_decryption_material_from_password(self):
-        pass
-    def encrypt_registration_request(self):
-        pass
-    def encrypt_secure_message(self):
-        pass
-    def compute_integrity_value(self):
-        pass
-    def verify_integrity_value(self):
-        pass
-    def verify_digital_signature(self):
-        pass
-    def decrypt_protected_response(self):
-        pass
-    def decrypt_incoming_message(self,):
-        pass
-# =========================================
-# 4. Transport/Protocol Layer
-# =========================================
-class ClientConnectionManager:
-    def __init__(self):
-        self.active_socket_handle = None
-        self.connection_state = False
-        self.receive_loop_state = None
-        self.registered_packet_handler = None
-        self.registered_disconnect_handler = None
-        self.remote_endpoint_info = None
-    def connect_to_server(self,active_socket_handle):
-        pass
-    def disconnect_form_server(self,DisconnectMessage):
-        pass
-    def send_registration_request(self,RegistrationRequestMessage):
-        pass
-    def send_authentication_request(self,AuthenticationRequestMessage):
-        pass
-    def receive_authentication_challenge(self,AuthenticationChallengeMessage):
-        pass
-    def send_authentication_response(self,AuthenticationResponseMessage):
-        pass
-    def secure_packet(self,SecureMessagePacket):
-        pass
-    def start_receive_loop(self):
-        pass
-    def register_incoming_packet_handler(self):
-        pass
-    def register_disconnect_handler(self):
-        pass
-    def report_connection_state(self):
-        pass
-    def open_session(self):
-        pass
-    def close_session(self):
-        pass
-    def send_application_message(self):
-        pass
-    def receive_application_message(self):
-        pass
-    def detect_connection_loss(self):
-        pass
-    def notify_disconnect(self):
-        pass
 
 
 # =========================================
-# 5. Application / Workflow Logic
+# 2. Application / Workflow Logic
 # =========================================
 class ClientAppCoordinator:
     def __init__(self):
@@ -352,19 +172,193 @@ class Disconnet_controller:
     def handle_disconnect_error(self):
         pass
 
+# =========================================
+# 3. Transport/Protocol Layer
+# =========================================
+class ClientConnectionManager:
+    def __init__(self):
+        self.active_socket_handle = None
+        self.connection_state = False
+        self.receive_loop_state = None
+        self.registered_packet_handler = None
+        self.registered_disconnect_handler = None
+        self.remote_endpoint_info = None
+    def connect_to_server(self,active_socket_handle):
+        pass
+    def disconnect_form_server(self,DisconnectMessage):
+        pass
+    def send_registration_request(self,RegistrationRequestMessage):
+        pass
+    def send_authentication_request(self,AuthenticationRequestMessage):
+        pass
+    def receive_authentication_challenge(self,AuthenticationChallengeMessage):
+        pass
+    def send_authentication_response(self,AuthenticationResponseMessage):
+        pass
+    def secure_packet(self,SecureMessagePacket):
+        pass
+    def start_receive_loop(self):
+        pass
+    def register_incoming_packet_handler(self):
+        pass
+    def register_disconnect_handler(self):
+        pass
+    def report_connection_state(self):
+        pass
+    def open_session(self):
+        pass
+    def close_session(self):
+        pass
+    def send_application_message(self):
+        pass
+    def receive_application_message(self):
+        pass
+    def detect_connection_loss(self):
+        pass
+    def notify_disconnect(self):
+        pass
+
+# =========================================
+# 4. Security
+# =========================================
+class ClientCryptoServer:
+    def __init__(self):
+        self.server_encryption_public_keys = None
+        self.server_signature_verification_public_keys = None
+        self.crypto_readiness_status = False
+    def load_server_public_keys(self,PublicKeySet):
+        self.server_encryption_public_keys = PublicKeySet
+    def derive_enrollment_values_from_password(self):
+        pass
+    def derive_authentication_key_from_password(self):
+        pass
+    def derive_response_decryption_material_from_password(self):
+        pass
+    def encrypt_registration_request(self):
+        pass
+    def encrypt_secure_message(self):
+        pass
+    def compute_integrity_value(self):
+        pass
+    def verify_integrity_value(self):
+        pass
+    def verify_digital_signature(self):
+        pass
+    def decrypt_protected_response(self):
+        pass
+    def decrypt_incoming_message(self,):
+        pass
+
 
 
 
 
 # =========================================
-# 6. Client GUI / Presentation
+# 5. Runtime State / Observability
 # =========================================
+class ConnectionSettingsManager:
+    def __init__(self):
+        self.server_ip = ""
+        self.server_port = 0
+        self.configuration_valid = False
+        self.readiness_for_registration = False
+        self.readiness_for_authentication = False
+        self.readiness_for_reconnect = False
+    def load_current_connection_settings(self):
+        return ConnectionSettings(
+            server_ip = self.server_ip,
+            server_port = self.server_port,
+            configuration_valid = self.configuration_valid,
+            readiness_for_registeration = self.readiness_for_registration,
+            readiness_for_authentication = self.readiness_for_authentication,
+            readiness_for_reconnect = self.readiness_for_reconnect,
+
+        )
+
+    def  validate_connection_settings(self):
+        if self.server_ip == "":
+            self.configuration_valid = False
+            return False
+        if self.server_port <= 0:
+            self.configuration_valid = False
+            return False
+        configuration_valid = True
+        return True
 
 
+    def save_connection_settings(self,server_ip, server_port):
+        self.server_ip = server_ip
+        self.server_port  = server_port
+        self.validate_connection_settings()
 
+    def update_connection_settings(self,server_ip,server_port):
+        self.server_ip = server_ip
+        self.server_port = server_port
+        self.validate_connection_settings()
 
+    def  get_current_connection_settings(self):
+        return ConnectionSettings(
+            server_ip = self.server_ip,
+            server_port = self.server_port,
+            configuration_valid = self.configuration_valid,
+            readiness_for_registration = self.readiness_for_registration,
+            readiness_for_authentication = self.readiness_for_authentication,
+            readiness_for_reconnect= self.readiness_for_reconnect,
+        )
+    def determine_connection_readiness(self):
+        if self.configuration_valid:
+            self.readiness_for_registration = True
+            self.readiness_for_authentication = True
+            self.readiness_for_reconnect = True
+            return True
+        self.readiness_for_registration = False
+        self.readiness_for_authentication = False
+        self.readiness_for_reconnect = False
+        return False
 
-
-
+class ClientSessionManager:
+    def __init__(self):
+        self.connected = False
+        self.authenticated = False
+        self.channel_ready = False
+        self.channel_unavailable = False
+        self.send_ready = False
+        self.receive_ready = False
+        self.current_username = None
+        self.current_server_endpoint_summary = None
+    def get_connection_state(self):
+        pass
+    def set_connection_state(self):
+        pass
+    def get_authentication_state(self):
+        pass
+    def set_authentication_state(self):
+        pass
+    def set_channel_readiness(self):
+        pass
+    def check_send_readiness(self):
+        pass
+    def check_receive_readiness(self):
+        pass
+    def get_overall_session_state(self):
+        pass
+    def reset_session_state(self):
+        pass
+    def notify_state_change(self):
+        pass
+class ChannelKeyStore:
+    def __init__(self):
+        self.aes_key = None
+        self.iv = None
+        self.hmac_key = None
+        self.keys_loaded = False
+    def stor_channel_keys(self):
+        pass
+    def retrieve_channel_keys(self):
+        pass
+    def check_key_availability(self):
+        pass
+    def clear_channel_keys(self):
+        pass
 
 

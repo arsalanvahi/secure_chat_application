@@ -1,185 +1,26 @@
 #server.py should be organized in this order
-# =========================================
-# 1. Shared / Common Enums, Constants, Message Types
-# =========================================
 
 # =========================================
-# 2. Shared / Common Data Structures
+# Shared / Common Data Structures
 # =========================================
 
 # =========================================
-# 3. Persistence
+# Shared / Common Enums, Constants, Message Types
 # =========================================
-class EnrollmentRepository:
-    def __init__(self):
-        self.enrollment_records = None
-        self.persistent_stor_handle = None
-    def save_enrollment_records(self):
-        pass
-    def retrieve_enrollment_record_by_username(self):
-        pass
-    def check_whether_username_exists(self):
-        pass
 
 
 # =========================================
-# 4. Runtime State
+# 1. Server GUI / Presentation
 # =========================================
-class ServeSessionManager:
-    def __init__(self):
-        self.active_connections = None
-        self.authenticated_sessions = None
-        self.online_users = None
-        self.username_to_session_mapping = None
-        self.connection_to_user_mapping = None
-        self.channel_participants = None
-    def add_connections(self):
-        pass
-    def remove_connections(self):
-        pass
-    def bind_connectio_to_identy(self):
-        pass
-    def mark_session_authenticated(self):
-        pass
-    def check_whether_username_is_active(self):
-        pass
-    def get_session_by_identifier(self):
-        pass
-    def get_connected_clients(self):
-        pass
-    def get_authenticated_clients(self):
-        pass
-    def resolve_recipients_for_channel(self):
-        pass
-    def clear_all_sessions(self):
-        pass
-
-class ServerRuntimeContex:
-    def __init__(self):
-        self.lifecycle_state_snapshot = None
-        self.active_runtime_structure_registry = None
-        self.channel_availability_snapshot = None
-        self.monitoring_snapshot = None
-        self.retry_recovery_flags = None
-    def get_lifecycle_state(self):
-        pass
-    def set_lifecycle_state(self):
-        pass
-    def register_runtime_structure(self):
-        pass
-    def retrieve_runtime_structure(self):
-        pass
-    def set_channel_availability(self):
-        pass
-    def get_channel_availability(self):
-        pass
-    def clear_runtime_state(self):
-        pass
-    def snapshot_monitoring_state(self):
-        pass
 
 # =========================================
-# 5. Security
+# 2. Monitoring
 # =========================================
-class ServerCryptoService:
-    def __init__(self):
-        self.loaded_rsa_encryption_key_pair = None
-        self.loaded_rsa_signing_key_pairs = None
-        self.key_validity_status = False
-        self.crypto_readiness_status = False
 
-    def load_rsa_keys(self):
-        pass
-
-    def validate_rsa_keys(self):
-        pass
-
-    def decrypt_registration_payload(self):
-        pass
-
-    def generate_secure_challenge(self):
-        pass
-
-    def verify_challenge_response(self):
-        pass
-
-    def derive_response_protection_material(self):
-        pass
-
-    def encrypt_authentication_result(self):
-        pass
-
-    def sign_response(self):
-        pass
-
-    def derive_channel_key_material(self):
-        pass
 
 
 # =========================================
-# 6. Transport / Lifecycle
-# =========================================
-class ServerTransportManager:
-    def __init__(self):
-        self.listening_socket = None
-        self.accept_loop_state = None
-        self.active_connection_handler_set = set()
-        self.packet_dispatch_registration = None
-        self.transport_health_state = None
-    def start_accepting_client_connections(self):
-        pass
-    def stop_accepting_client_connections(self):
-        pass
-    def receive_client_packet(self):
-        pass
-    def dispatch_incoming_packet(self):
-        pass
-    def send_response_to_client(self):
-        pass
-    def broadcast_packet_to_recipients(self):
-        pass
-    def detect_client_disconnect(self):
-        pass
-    def register_transport_handler(self):
-        pass
-    def open_session(self):
-        pass
-    def close_session(self):
-        pass
-    def send_application_message(self):
-        pass
-    def receive_application_message(self):
-        pass
-class ServerLifecycleManager:
-    def __init__(self):
-        self.lifecycle_phase = None
-        self.startup_in_progress = False
-        self.shutdown_in_progress = False
-        self.last_lifecycle_result = None
-        self.last_lifecycle_error = None
-    def validate_startup_request(self):
-        pass
-    def initialize_runtime(self):
-        pass
-    def bind_and_listen(self):
-        pass
-    def enter_running_state(self):
-        pass
-    def begin_shutdown(self):
-        pass
-    def stop_accepting_new_connections(self):
-        pass
-    def terminate_active_sessions(self):
-        pass
-    def release_runtime_resources(self):
-        pass
-    def finalize_shutdown(self):
-        pass
-    def get_lifecycle_state(self):
-        pass
-
-# =========================================
-# 7. Application / Service Logic
+# 3. Application / Service Logic
 # =========================================
 class ServerAppCoordinator:
     def __init__(self):
@@ -294,11 +135,180 @@ class ChannelKeyManager:
 
 
 
+# =========================================
+# 4. Transport / Lifecycle
+# =========================================
+class ServerTransportManager:
+    def __init__(self):
+        self.listening_socket = None
+        self.accept_loop_state = None
+        self.active_connection_handler_set = set()
+        self.packet_dispatch_registration = None
+        self.transport_health_state = None
+    def start_accepting_client_connections(self):
+        pass
+    def stop_accepting_client_connections(self):
+        pass
+    def receive_client_packet(self):
+        pass
+    def dispatch_incoming_packet(self):
+        pass
+    def send_response_to_client(self):
+        pass
+    def broadcast_packet_to_recipients(self):
+        pass
+    def detect_client_disconnect(self):
+        pass
+    def register_transport_handler(self):
+        pass
+    def open_session(self):
+        pass
+    def close_session(self):
+        pass
+    def send_application_message(self):
+        pass
+    def receive_application_message(self):
+        pass
+class ServerLifecycleManager:
+    def __init__(self):
+        self.lifecycle_phase = None
+        self.startup_in_progress = False
+        self.shutdown_in_progress = False
+        self.last_lifecycle_result = None
+        self.last_lifecycle_error = None
+    def validate_startup_request(self):
+        pass
+    def initialize_runtime(self):
+        pass
+    def bind_and_listen(self):
+        pass
+    def enter_running_state(self):
+        pass
+    def begin_shutdown(self):
+        pass
+    def stop_accepting_new_connections(self):
+        pass
+    def terminate_active_sessions(self):
+        pass
+    def release_runtime_resources(self):
+        pass
+    def finalize_shutdown(self):
+        pass
+    def get_lifecycle_state(self):
+        pass
+
 
 # =========================================
-# 8. Monitoring
+# 5. Security
 # =========================================
+class ServerCryptoService:
+    def __init__(self):
+        self.loaded_rsa_encryption_key_pair = None
+        self.loaded_rsa_signing_key_pairs = None
+        self.key_validity_status = False
+        self.crypto_readiness_status = False
+
+    def load_rsa_keys(self):
+        pass
+
+    def validate_rsa_keys(self):
+        pass
+
+    def decrypt_registration_payload(self):
+        pass
+
+    def generate_secure_challenge(self):
+        pass
+
+    def verify_challenge_response(self):
+        pass
+
+    def derive_response_protection_material(self):
+        pass
+
+    def encrypt_authentication_result(self):
+        pass
+
+    def sign_response(self):
+        pass
+
+    def derive_channel_key_material(self):
+        pass
+
 
 # =========================================
-# 9. Server GUI / Presentation
+# 6. Runtime State
 # =========================================
+class ServeSessionManager:
+    def __init__(self):
+        self.active_connections = None
+        self.authenticated_sessions = None
+        self.online_users = None
+        self.username_to_session_mapping = None
+        self.connection_to_user_mapping = None
+        self.channel_participants = None
+    def add_connections(self):
+        pass
+    def remove_connections(self):
+        pass
+    def bind_connectio_to_identy(self):
+        pass
+    def mark_session_authenticated(self):
+        pass
+    def check_whether_username_is_active(self):
+        pass
+    def get_session_by_identifier(self):
+        pass
+    def get_connected_clients(self):
+        pass
+    def get_authenticated_clients(self):
+        pass
+    def resolve_recipients_for_channel(self):
+        pass
+    def clear_all_sessions(self):
+        pass
+
+class ServerRuntimeContex:
+    def __init__(self):
+        self.lifecycle_state_snapshot = None
+        self.active_runtime_structure_registry = None
+        self.channel_availability_snapshot = None
+        self.monitoring_snapshot = None
+        self.retry_recovery_flags = None
+    def get_lifecycle_state(self):
+        pass
+    def set_lifecycle_state(self):
+        pass
+    def register_runtime_structure(self):
+        pass
+    def retrieve_runtime_structure(self):
+        pass
+    def set_channel_availability(self):
+        pass
+    def get_channel_availability(self):
+        pass
+    def clear_runtime_state(self):
+        pass
+    def snapshot_monitoring_state(self):
+        pass
+
+
+# =========================================
+# 7. Persistence
+# =========================================
+class EnrollmentRepository:
+    def __init__(self):
+        self.enrollment_records = None
+        self.persistent_stor_handle = None
+    def save_enrollment_records(self):
+        pass
+    def retrieve_enrollment_record_by_username(self):
+        pass
+    def check_whether_username_exists(self):
+        pass
+
+
+
+
+
+
