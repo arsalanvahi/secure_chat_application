@@ -256,44 +256,51 @@ class ClientConnectionManager:
     def __init__(self):
         self.active_socket_handle = None
         self.connection_state = False
-        self.receive_loop_state = None
-        self.registered_packet_handler = None
-        self.registered_disconnect_handler = None
+        self.receive_loop_state = False
+        self.registered_packet_handler = {}
+        self.registered_disconnect_handler = []
         self.remote_endpoint_info = None
-    def connect_to_server(self,active_socket_handle):
+    def connect_to_server(self,socket_handle):
+        self.active_socket_handle = socket_handle
+        self.connection_state = True
+
+    def disconnect_form_server(self,disconnect_message=None):
+        self.active_socket_handle = None
+        self.connection_state = False
+
+    def send_registration_request(self,request_message):
+        return self.send_application_message(request_message)
+    def send_authentication_request(self):
         pass
-    def disconnect_form_server(self,DisconnectMessage):
+    def receive_authentication_challenge(self):
         pass
-    def send_registration_request(self,RegistrationRequestMessage):
+    def send_authentication_response(self):
         pass
-    def send_authentication_request(self,AuthenticationRequestMessage):
-        pass
-    def receive_authentication_challenge(self,AuthenticationChallengeMessage):
-        pass
-    def send_authentication_response(self,AuthenticationResponseMessage):
-        pass
-    def secure_packet(self,SecureMessagePacket):
+    def secure_packet(self):
         pass
     def start_receive_loop(self):
         pass
-    def register_incoming_packet_handler(self):
-        pass
-    def register_disconnect_handler(self):
-        pass
+    def register_incoming_packet_handler(self,message_type, handler):
+        self.registered_packet_handler[message_type] = handler
+    def register_disconnect_handler(self,handler):
+        self.registered_disconnect_handler.append(handler)
     def report_connection_state(self):
-        pass
+        return self.connection_state
     def open_session(self):
-        pass
+        self.connection_state = True
     def close_session(self):
-        pass
-    def send_application_message(self):
-        pass
+        self.connection_state = False
+        self.active_socket_handle = None
+    def send_application_message(self,message):
+        return message
     def receive_application_message(self):
         pass
     def detect_connection_loss(self):
-        pass
+        return not self.connection_state
     def notify_disconnect(self):
-        pass
+        for handler in self.registered_disconnect_handler:
+            handler()
+
 
 # =========================================
 # 4. Security

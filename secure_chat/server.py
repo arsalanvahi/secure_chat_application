@@ -112,6 +112,13 @@ class ConnectionLostEvent:
     reason:str
     details:str=""
 
+
+@dataclass
+class EnrollmentRecord:
+    username:str
+    password_hash:bytes
+    reversed_password_hash:bytes
+    subscribed_channel:ChannelName
 # =========================================
 # 1. Server GUI / Presentation
 # =========================================
@@ -401,14 +408,17 @@ class ServerRuntimeContext:
 # =========================================
 class EnrollmentRepository:
     def __init__(self):
-        self.enrollment_records = None
-        self.persistent_store_handle = None
-    def save_enrollment_record(self):
-        pass
-    def retrieve_enrollment_record_by_username(self):
-        pass
-    def check_whether_username_exists(self):
-        pass
+        self.enrollment_records = {}
+        self.persistent_store_handle=None
+    def save_enrollment_record(self,enrollment_records):
+        self.enrollment_records[enrollment_records.username] =enrollment_records
+
+
+    def retrieve_enrollment_record_by_username(self,username):
+        return self.enrollment_records.get(username)
+
+    def check_whether_username_exists(self,username):
+        return username in self.enrollment_records
 
 
 
