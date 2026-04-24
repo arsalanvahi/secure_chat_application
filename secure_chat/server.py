@@ -379,7 +379,7 @@ class ServerTransportManager:
             return None
         return handler(connection_id,packet)
     def send_response_to_client(self,connection_id, response_bytes):
-        self.send_application_message(connection_id,response_bytes)
+        return self.send_application_message(connection_id,response_bytes)
     def broadcast_packet_to_recipients(self,recipients_ids,response_bytes):
         results = {}
         for recipients_id in recipients_ids:
@@ -439,7 +439,7 @@ class ServerTransportManager:
             self.transport_health_state.healthy = False
             self.transport_health_state.last_error = str(error)
             self.detect_client_disconnect(connection_id)
-            return False
+            return None
         return data
 
 
@@ -505,10 +505,14 @@ class ServerCryptoService:
             self.key_validity_status = False
             self.crypto_readiness_status = False
             return False
-        if self.key_validity_status is None:
-            self.loaded_rsa_encryption_key_pair = False
+        if self.loaded_rsa_signing_key_pair is None:
+            self.key_validity_status = False
             self.crypto_readiness_status = False
             return False
+        self.key_validity_status = True
+        self.crypto_readiness_status = True
+        return True
+
 
 
     def decrypt_registration_payload(self,encrypted_registration_payload):
@@ -518,13 +522,13 @@ class ServerCryptoService:
             return None
         username = parts[0]
         password_hash = bytes.fromhex(parts[1])
-        reversed_hash_password = bytes.fromhex(parts[2])
+        reversed_password_hash = bytes.fromhex(parts[2])
         selected_channel = ChannelName(parts[3])
 
         payload = RegistrationPayload(
             username=username,
             password_hash=password_hash,
-            reversed_password_hash=reversed_hash_password,
+            reversed_password_hash=reversed_password_hash,
             selected_channel=selected_channel
         )
         return payload

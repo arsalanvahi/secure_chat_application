@@ -83,7 +83,7 @@ class RegistrationController:
         self.pending_registration_input = None
         self.registration_in_progress = False
         self.last_registration_result = None
-        self. last_registration_error = None
+        self.last_registration_error = None
     def start_registration(self,server_ip, server_port, username, password,selected_channel):
         self.pending_registration_input = RegistrationInput(
             server_ip = server_ip,
@@ -92,6 +92,9 @@ class RegistrationController:
             password=password,
             selected_channel=selected_channel,
         )
+        self.registration_in_progress = True
+        self.last_registration_result = None
+        self.last_registration_error = None
 
     def validate_registration_input(self):
         if self.pending_registration_input is None:
@@ -105,15 +108,16 @@ class RegistrationController:
             return False
         if self.pending_registration_input.selected_channel == "":
             self.last_registration_error = "channel name is empty"
+            return False
 
         return True
 
 
-    def prepare_registration_payload(self):
+    def prepare_registration_payload(self,client_crypto_service):
         if self.pending_registration_input is None:
             self.last_registration_error = "No registration input valid"
             return None
-        derived_values = ClientCryptoService.derive_enrollment_values_from_password(self.pending_registration_input.password)
+        derived_values = client_crypto_service.derive_enrollment_values_from_password(self.pending_registration_input.password)
 
 
         payload = RegistrationPayload(
@@ -125,13 +129,25 @@ class RegistrationController:
 
         )
         return payload
-    def submit_registration_request(self):
-        pass
+    def submit_registration_request(self,client_crypto_service, client_connection_manager):
+        payload = self.prepare_registration_payload(client_crypto_service)
+        if payload is None:
+            return None
+        encrypted_payload = client_connection_manager.encrypt_registration_request(payload)
+        request_message = RegistrationRequestMessage(
+            message_type=MessageType.REG_REQ,
+            encrypted_payload=encrypted_payload
+
+        )
+        client_connection_manager.send_registration_request(request_message)
+        return request_message
+
+
     def handle_registration_response(self,response_message):
         if response_message is None:
             self.last_registration_error = "No Registration Response"
             return False
-        if response_message.result_code == "success":
+        if response_message.result_code == "SUCCESS":
             self.last_registration_result = RegistrationResult(
                 success=True,
                 message=response_message.result_message,
@@ -181,7 +197,7 @@ class AuthenticationController:
     def abort_authentication(self):
         pass
 class SecureMessageSender:
-    def __init__(self,current_outgoing_plaintext,current_protected_packet):
+    def __init__(self):
         self.current_outgoing_plaintext = None
         self.current_protected_packet = None
         self.send_in_progress = False
@@ -264,7 +280,7 @@ class ClientConnectionManager:
         self.active_socket_handle = socket_handle
         self.connection_state = True
 
-    def disconnect_form_server(self,disconnect_message=None):
+    def disconnect_from_server(self,disconnect_message=None):
         self.active_socket_handle = None
         self.connection_state = False
 
@@ -342,17 +358,21 @@ class ClientCryptoService:
         }
 
     def encrypt_registration_request(self,registration_payload):
+        selected_channel = registration_payload.selected_channel
+        if hasattr(selected_channel,"value"):
+            selected_channel = selected_channel.value
+
         payload_text=(
             registration_payload.username
             + "|"
             + registration_payload.password_hash.hex()
             + "|"
-            + registration_payload.reserved_password_hash.hex()
+            + registration_payload.reversed_password_hash.hex()
             + "|"
             + registration_payload.selected_channel
         )
-        encrypted_registration_payload = payload_text
-        return encrypted_registration_payload
+
+        return payload_text.encode("utf-8")
     def encrypt_secure_message(self,message):
         pass
     def compute_integrity_value(self,value):
@@ -388,7 +408,7 @@ class ConnectionSettingsManager:
             configuration_valid = self.configuration_valid,
             readiness_for_reconnect = self.readiness_for_registration,
             readiness_for_authentication = self.readiness_for_authentication,
-             readiness_for_registration= self.readiness_for_reconnect,
+            readiness_for_registration= self.readiness_for_reconnect,
 
         )
 
@@ -399,7 +419,7 @@ class ConnectionSettingsManager:
         if self.server_port <= 0:
             self.configuration_valid = False
             return False
-        configuration_valid = True
+        self.configuration_valid = True
         return True
 
 
@@ -407,11 +427,14 @@ class ConnectionSettingsManager:
         self.server_ip = server_ip
         self.server_port  = server_port
         self.validate_connection_settings()
+        self.determine_connection_readiness()
 
     def update_connection_settings(self,server_ip,server_port):
         self.server_ip = server_ip
         self.server_port = server_port
         self.validate_connection_settings()
+        self.determine_connection_readiness()
+
 
     def  get_current_connection_settings(self):
         return ConnectionSettings(
@@ -444,20 +467,29 @@ class ClientSessionManager:
         self.receive_ready = False
         self.current_username = None
         self.current_server_endpoint_summary = None
+    def _refresh_readiness(self):
+        self.send_ready = self.connected and self.authenticated and self.channel_ready
+        self.receive_ready = self.connected and self.authenticated and self.channel_ready
+
     def get_connection_state(self):
         return self.connected
     def set_connection_state(self,value):
         self.connected = value
+        self._refresh_readiness()
 
     def get_authentication_state(self):
         return self.authenticated
     def set_authentication_state(self,value):
         self.authenticated = value
+        self._refresh_readiness()
+
     def set_channel_readiness(self,value):
         self.channel_ready = value
         self.channel_unavailable = not value
+        self._refresh_readiness()
+
     def check_send_readiness(self):
-        return self.channel_ready
+        return self.send_ready
     def check_receive_readiness(self):
         return self.receive_ready
     def get_overall_session_state(self):
