@@ -1,10 +1,10 @@
 #server.py should be organized in this order
-import dataclasses
+
 import socket
 import hashlib
 from enum import Enum
 from dataclasses import dataclass
-from multiprocessing import connection
+
 
 
 # =========================================
@@ -20,7 +20,6 @@ class MessageType(str,Enum):
     MSG_SEND = "MSG_SEND"
     MSG_BROADCAST = "MSG_BROADCAST"
     DISCONNECT = "DISCONNECT"
-    DISCONNECT_LOST = "DISCONNECT_LOST"
     CONNECTION_LOST = "CONNECTION_LOST"
 
 
@@ -68,7 +67,7 @@ class ChannelKeySet:
 @dataclass
 class RegistrationRequestMessage:
     message_type:MessageType
-    encrypted_payloads:bytes
+    encrypted_payload:bytes
 
 @dataclass
 class RegistrationResponseMessage:
@@ -123,10 +122,10 @@ class EnrollmentRecord:
     subscribed_channel:ChannelName
 
 
-    @dataclass
-    class DerivedResponseProtectionMaterial:
-        aes_key:bytes
-        iv:bytes
+@dataclass
+class DerivedResponseProtectionMaterial:
+    aes_key:bytes
+    iv:bytes
 
 @dataclass
 class DerivedChannelKeyMaterial:
@@ -150,7 +149,7 @@ class ConnectionHandle:
 
 @dataclass
 class TransportHealthState:
-        Healthy:bool=True
+        healthy:bool=True
         last_error:str = ""
 
 
@@ -188,28 +187,98 @@ class ServerAppCoordinator:
         pass
     def get_server_status(self):
         pass
+
+
 class RegistrationService:
     def __init__(self):
         self.current_registration_request_context = None
         self.current_decrypted_registration_payload = None
         self.last_registration_result = None
         self.last_registration_error = None
-    def handle_registration_request(self):
-        pass
-    def decrypt_registration_payload(self):
-        pass
-    def validate_registration_payload(self):
-        pass
-    def check_username_availability(self):
-        pass
-    def save_enrollment_record(self):
-        pass
-    def create_registration_result(self):
-        pass
-    def sign_registration_result(self):
-        pass
-    def send_registration_response(self):
-        pass
+    def handle_registration_request(self,request_message,server_crypto_service,enrollment_repository):
+        payload = self.decrypt_registration_payload(request_message.encrypted_payload,server_crypto_service)
+        if not self.validate_registration_payload(payload):
+            result =  self.create_registration_result(False,self.last_registration_error)
+            signature = self.sign_registration_result(result,server_crypto_service)
+            return self.send_registration_response(result,enrollment_repository)
+        username_available =  self.check_username_availability(payload.username,enrollment_repository)
+        if not username_available:
+            result = self.create_registration_result(False,"Username Already Exists")
+            signature = self.sign_registration_result(result,enrollment_repository)
+            return self.send_registration_response(result, signature)
+        self.save_enrollment_record(payload,enrollment_repository)
+
+        result = self.create_registration_result(True,"Registration Completed Successfully")
+        signature = self.sign_registration_result(result,enrollment_repository)
+        return self.send_registration_response(result,enrollment_repository)
+
+
+
+
+
+
+
+    def decrypt_registration_payload(self,encrypted_payload,crypto_service):
+        payload = crypto_service.decrypt_registration_payload(encrypted_payload)
+        self.current_decrypted_registration_payload = payload
+        return payload
+
+
+    def validate_registration_payload(self,payload):
+        if self.current_decrypted_registration_payload is None:
+            self.last_registration_error = "Registration payload is missing"
+            return False
+        if payload.username == "":
+            self.last_registration_error = "Username is empty"
+            return False
+        if payload.password_hash is None:
+            self.last_registration_error  = "Password hash is empty"
+            return False
+        if payload.selected_channel is None:
+            self.last_registration_error = "selected channel is empty"
+            return False
+        return True
+
+
+
+    def check_username_availability(self,username,enrollment_repository):
+        return not enrollment_repository.check_whether_username_exists(username)
+
+    def save_enrollment_record(self,payload,enrollment_repository):
+        record = EnrollmentRecord(
+            username= payload.username,
+            password_hash=payload.password_hash,
+            reversed_password_hash=payload.reversed_password_hash,
+            subscribed_channel=payload.selected_channel
+        )
+        enrollment_repository.save_enrollment_record(record)
+        return record
+
+    def create_registration_result(self,success,message):
+        result = RegistrationResult(
+            success=success,
+            message=message,
+            retry_possible=not success
+        )
+        self.last_registration_result = result
+        return result
+
+    def sign_registration_result(self,result,server_crypto_service):
+        return server_crypto_service.sign_response(result)
+
+    def send_registration_response(self,result,signature):
+        result_code = "SUCCESS" if result.success else "FAILURE"
+        return RegistrationResponseMessage(
+            message_type=MessageType.REG_RES,
+            result_code=result_code,
+            result_message=result.success,
+            signature=signature
+
+        )
+
+
+
+
 class AuthenticationService:
     def __init__(self):
         self.current_authentication_request_context = None

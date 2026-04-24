@@ -318,7 +318,7 @@ class ClientCryptoService:
         password_bytes = password.encode("utf-8")
         reversed_password_bytes = password[::-1].encode("utf-8")
 
-        password_hash= hashlib.sha3_512(password_bytes).digest()
+        password_hash = hashlib.sha3_512(password_bytes).digest()
         reversed_password_hash = hashlib.sha3_512(reversed_password_bytes).digest()
 
         return {
