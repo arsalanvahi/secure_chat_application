@@ -341,16 +341,18 @@ class ClientCryptoService:
             "response_decryption_iv":response_decryption_iv,
         }
 
-    def encrypt_registration_request(self,RegistrationPayload):
+    def encrypt_registration_request(self,registration_payload):
         payload_text=(
-            RegistrationPayload.username
+            registration_payload.username
             + "|"
-            + RegistrationPayload.password_hash.hex()
+            + registration_payload.password_hash.hex()
             + "|"
-            + RegistrationPayload.reserved_password_hash.hex()
+            + registration_payload.reserved_password_hash.hex()
             + "|"
-            + RegistrationPayload.selected_channel
+            + registration_payload.selected_channel
         )
+        encrypted_registration_payload = payload_text
+        return encrypted_registration_payload
     def encrypt_secure_message(self,message):
         pass
     def compute_integrity_value(self,value):

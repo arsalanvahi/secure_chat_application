@@ -1,8 +1,10 @@
 #server.py should be organized in this order
 import dataclasses
+import socket
+import hashlib
 from enum import Enum
 from dataclasses import dataclass
-
+from multiprocessing import connection
 
 
 # =========================================
@@ -119,6 +121,43 @@ class EnrollmentRecord:
     password_hash:bytes
     reversed_password_hash:bytes
     subscribed_channel:ChannelName
+
+
+    @dataclass
+    class DerivedResponseProtectionMaterial:
+        aes_key:bytes
+        iv:bytes
+
+@dataclass
+class DerivedChannelKeyMaterial:
+        aes_key:bytes
+        iv:bytes
+        hmac_key:bytes
+@dataclass
+class RsaKeySet:
+        encryption_public_key:bytes
+        decryption_private_key:bytes
+        signing_private_key:bytes
+        verification_public_key:bytes
+        validity_status:bool=False
+
+@dataclass
+class ConnectionHandle:
+        connection_id:str
+        socket_handle:socket.socket
+        client_address:tuple
+        active:bool=True
+
+@dataclass
+class TransportHealthState:
+        Healthy:bool=True
+        last_error:str = ""
+
+
+
+
+
+
 # =========================================
 # 1. Server GUI / Presentation
 # =========================================
@@ -251,34 +290,90 @@ class ChannelKeyManager:
 class ServerTransportManager:
     def __init__(self):
         self.listening_socket = None
-        self.accept_loop_state = None
-        self.active_connection_handler_set = set()
-        self.packet_dispatch_registration = None
-        self.transport_health_state = None
+        self.accept_loop_state = False
+        self.active_connection_handler_set = {}
+        self.packet_dispatch_registration = {}
+        self.transport_health_state = TransportHealthState()
     def start_accepting_client_connections(self):
-        pass
+        self.accept_loop_state = True
+
     def stop_accepting_client_connections(self):
-        pass
-    def receive_client_packet(self):
-        pass
-    def dispatch_incoming_packet(self):
-        pass
-    def send_response_to_client(self):
-        pass
-    def broadcast_packet_to_recipients(self):
-        pass
-    def detect_client_disconnect(self):
-        pass
-    def register_transport_handlers(self):
-        pass
-    def open_session(self):
-        pass
-    def close_session(self):
-        pass
-    def send_application_message(self):
-        pass
-    def receive_application_message(self):
-        pass
+        self.accept_loop_state = False
+    def receive_client_packet(self,connection_id):
+        return self.receive_application_message(connection_id)
+    def dispatch_incoming_packet(self,connection_id, packet):
+        if packet is None:
+            return None
+        message_type = getattr(packet,"message_type",None)
+        handler = self.packet_dispatch_registration.get(message_type)
+        if handler is None:
+            return None
+        return handler(connection_id,packet)
+    def send_response_to_client(self,connection_id, response_bytes):
+        self.send_application_message(connection_id,response_bytes)
+    def broadcast_packet_to_recipients(self,recipients_ids,response_bytes):
+        results = {}
+        for recipients_id in recipients_ids:
+            results[recipients_id] = self.send_application_message(recipients_id,response_bytes)
+        return results
+
+
+    def detect_client_disconnect(self,connection_id):
+        self.close_session(connection_id)
+    def register_transport_handlers(self,handlers):
+        self.packet_dispatch_registration = handlers
+
+    def open_session(self,connection_id,socket_handle,client_address,):
+        handle = ConnectionHandle(
+            connection_id=connection_id,
+            socket_handle=socket_handle,
+            client_address=client_address,
+            active = True
+        )
+        self.active_connection_handler_set[connection_id] = handle
+        return handle
+    def close_session(self,connection_id):
+        handle= self.active_connection_handler_set.get(connection_id)
+        if handle is None:
+            return
+        try:
+            handle.socket_handle.close()
+        except Exception:
+            pass
+        handle.active = False
+        del self.active_connection_handler_set[connection_id]
+    def send_application_message(self,connection_id, data):
+        handle = self.active_connection_handler_set.get(connection_id)
+        if handle is None:
+            return False
+        try:
+            handle.socket_handle.sendall(data)
+            return True
+        except Exception as error:
+            self.transport_health_state.healthy = False
+            self.transport_health_state.last_error = str(error)
+            self.detect_client_disconnect(connection_id)
+            return False
+
+
+
+    def receive_application_message(self,connection_id):
+        handle = self.active_connection_handler_set.get(connection_id)
+        if handle is None:
+            return None
+        try:
+            data = handle.socket_handle.recv(4096)
+            if not data:
+                self.detect_client_disconnect(connection_id)
+                return None
+        except Exception as error:
+            self.transport_health_state.healthy = False
+            self.transport_health_state.last_error = str(error)
+            self.detect_client_disconnect(connection_id)
+            return False
+        return data
+
+
 class ServerLifecycleManager:
     def __init__(self):
         self.lifecycle_phase = None
@@ -314,18 +409,57 @@ class ServerLifecycleManager:
 class ServerCryptoService:
     def __init__(self):
         self.loaded_rsa_encryption_key_pair = None
-        self.loaded_rsa_signing_key_pairs = None
+        self.loaded_rsa_signing_key_pair = None
         self.key_validity_status = False
         self.crypto_readiness_status = False
 
-    def load_rsa_keys(self):
-        pass
+    def load_rsa_keys(self,rsa_key_set):
+        self.loaded_rsa_encryption_key_pair = {
+            "encryption_public_key":rsa_key_set.encryption_public_key,
+            "decryption_private_key":rsa_key_set.decryption_private_key
+
+        }
+        self.loaded_rsa_signing_key_pair = {
+            "signing_private_key":rsa_key_set.signing_private_key,
+            "verification_public_key":rsa_key_set.verification_public_key
+
+        }
+
+
+        self.crypto_readiness_status=rsa_key_set.validity_status
+        self.key_validity_status = rsa_key_set.validity_status
+
+
 
     def validate_rsa_keys(self):
-        pass
+        if self.loaded_rsa_encryption_key_pair is None:
+            self.key_validity_status = False
+            self.crypto_readiness_status = False
+            return False
+        if self.key_validity_status is None:
+            self.loaded_rsa_encryption_key_pair = False
+            self.crypto_readiness_status = False
+            return False
 
-    def decrypt_registration_payload(self):
-        pass
+
+    def decrypt_registration_payload(self,encrypted_registration_payload):
+        payload_text = encrypted_registration_payload.decode("utf-8")
+        parts = payload_text.split("|")
+        if len(parts) != 4:
+            return None
+        username = parts[0]
+        password_hash = bytes.fromhex(parts[1])
+        reversed_hash_password = bytes.fromhex(parts[2])
+        selected_channel = ChannelName(parts[3])
+
+        payload = RegistrationPayload(
+            username=username,
+            password_hash=password_hash,
+            reversed_password_hash=reversed_hash_password,
+            selected_channel=selected_channel
+        )
+        return payload
+
 
     def generate_secure_challenge(self):
         pass
@@ -339,8 +473,24 @@ class ServerCryptoService:
     def encrypt_authentication_result(self):
         pass
 
-    def sign_response(self):
-        pass
+    def sign_response(self,registration_result):
+        if registration_result is None:
+            return None
+        result_text = (
+            f"{registration_result.success}|"
+            f"{registration_result.message}"
+            f"{registration_result.retry_possible}"
+
+
+        )
+        result_bytes = result_text.encode("utf-8")
+        if self.loaded_rsa_signing_key_pair is not None:
+            signing_key=  self.loaded_rsa_signing_key_pair["signing_private_key"]
+            signature = hashlib.sha3_512(signing_key+result_bytes).digest()
+            return signature
+        return hashlib.sha3_512(result_bytes).digest()
+
+
 
     def derive_channel_key_material(self):
         pass
