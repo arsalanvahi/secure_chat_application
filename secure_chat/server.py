@@ -200,17 +200,17 @@ class RegistrationService:
         if not self.validate_registration_payload(payload):
             result =  self.create_registration_result(False,self.last_registration_error)
             signature = self.sign_registration_result(result,server_crypto_service)
-            return self.send_registration_response(result,enrollment_repository)
+            return self.send_registration_response(result,signature)
         username_available =  self.check_username_availability(payload.username,enrollment_repository)
         if not username_available:
             result = self.create_registration_result(False,"Username Already Exists")
-            signature = self.sign_registration_result(result,enrollment_repository)
+            signature = self.sign_registration_result(result,server_crypto_service)
             return self.send_registration_response(result, signature)
         self.save_enrollment_record(payload,enrollment_repository)
 
         result = self.create_registration_result(True,"Registration Completed Successfully")
-        signature = self.sign_registration_result(result,enrollment_repository)
-        return self.send_registration_response(result,enrollment_repository)
+        signature = self.sign_registration_result(result,server_crypto_service)
+        return self.send_registration_response(result,signature)
 
 
 
@@ -225,7 +225,7 @@ class RegistrationService:
 
 
     def validate_registration_payload(self,payload):
-        if self.current_decrypted_registration_payload is None:
+        if payload is None:
             self.last_registration_error = "Registration payload is missing"
             return False
         if payload.username == "":
@@ -233,6 +233,9 @@ class RegistrationService:
             return False
         if payload.password_hash is None:
             self.last_registration_error  = "Password hash is empty"
+            return False
+        if payload.reversed_password_hash is None:
+            self.last_registration_error = "Reversed password hash is empty"
             return False
         if payload.selected_channel is None:
             self.last_registration_error = "selected channel is empty"
@@ -271,7 +274,7 @@ class RegistrationService:
         return RegistrationResponseMessage(
             message_type=MessageType.REG_RES,
             result_code=result_code,
-            result_message=result.success,
+            result_message=result.message,
             signature=signature
 
         )
@@ -551,7 +554,7 @@ class ServerCryptoService:
             return None
         result_text = (
             f"{registration_result.success}|"
-            f"{registration_result.message}"
+            f"{registration_result.message}|"
             f"{registration_result.retry_possible}"
 
 
@@ -643,7 +646,28 @@ class EnrollmentRepository:
     def check_whether_username_exists(self,username):
         return username in self.enrollment_records
 
+def setup_server():
+    server_transport_manager = ServerTransportManager()
+    registration_service = RegistrationService()
+    server_crypto_service = ServerCryptoService()
+    enrollment_repository = EnrollmentRepository()
 
+    def handle_registration_packet(connection_id, packet):
+        return registration_service.handle_registration_request(
+            packet,
+            server_crypto_service,
+            enrollment_repository
+        )
+
+    server_transport_manager.register_transport_handlers({
+        MessageType.REG_REQ: handle_registration_packet
+    })
+
+    return server_transport_manager, registration_service, server_crypto_service, enrollment_repository
+
+if __name__ == "__main__":
+    server_transport_manager, registration_service, server_crypto_service, enrollment_repository = setup_server()
+    print("Server is configured.")
 
 
 

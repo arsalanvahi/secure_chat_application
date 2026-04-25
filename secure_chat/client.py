@@ -90,7 +90,7 @@ class RegistrationController:
             server_port=server_port,
             username=username,
             password=password,
-            selected_channel=selected_channel,
+            selected_channel=selected_channel
         )
         self.registration_in_progress = True
         self.last_registration_result = None
@@ -106,7 +106,7 @@ class RegistrationController:
         if self.pending_registration_input.password == "":
             self.last_registration_error = "password is empty"
             return False
-        if self.pending_registration_input.selected_channel == "":
+        if self.pending_registration_input.selected_channel is None:
             self.last_registration_error = "channel name is empty"
             return False
 
@@ -130,10 +130,12 @@ class RegistrationController:
         )
         return payload
     def submit_registration_request(self,client_crypto_service, client_connection_manager):
+        if not self.validate_registration_input():
+            return None
         payload = self.prepare_registration_payload(client_crypto_service)
         if payload is None:
             return None
-        encrypted_payload = client_connection_manager.encrypt_registration_request(payload)
+        encrypted_payload = client_crypto_service.encrypt_registration_request(payload)
         request_message = RegistrationRequestMessage(
             message_type=MessageType.REG_REQ,
             encrypted_payload=encrypted_payload
@@ -146,6 +148,7 @@ class RegistrationController:
     def handle_registration_response(self,response_message):
         if response_message is None:
             self.last_registration_error = "No Registration Response"
+            self.registration_in_progress = False
             return False
         if response_message.result_code == "SUCCESS":
             self.last_registration_result = RegistrationResult(
@@ -155,12 +158,15 @@ class RegistrationController:
 
 
             )
+            self.registration_in_progress = False
             return True
         self.last_registration_result = RegistrationResult(
             success=False,
             message=response_message.result_message,
             retry_possible=True
         )
+        self.last_registration_error = response_message.result_message
+        self.registration_in_progress = False
         return False
 
     def complete_registration(self):
@@ -369,7 +375,7 @@ class ClientCryptoService:
             + "|"
             + registration_payload.reversed_password_hash.hex()
             + "|"
-            + registration_payload.selected_channel
+            + selected_channel
         )
 
         return payload_text.encode("utf-8")
@@ -406,9 +412,9 @@ class ConnectionSettingsManager:
             server_ip = self.server_ip,
             server_port = self.server_port,
             configuration_valid = self.configuration_valid,
-            readiness_for_reconnect = self.readiness_for_registration,
+            readiness_for_reconnect = self.readiness_for_reconnect,
             readiness_for_authentication = self.readiness_for_authentication,
-            readiness_for_registration= self.readiness_for_reconnect,
+            readiness_for_registration= self.readiness_for_registration,
 
         )
 
