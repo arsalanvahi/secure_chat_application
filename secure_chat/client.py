@@ -1,6 +1,9 @@
 #client.py should be organized in this order
 import hashlib
+import hmac
 from dataclasses import dataclass
+from enum import auto
+
 # =========================================
 #Imports from server.py (shared/common structures only)
 # =========================================
@@ -195,18 +198,19 @@ class AuthenticationController:
         self.pending_username = None
         self.pending_authentication_input = None
         self.authentication_in_progress = False
-        self.pending_challenges = None
+        self.pending_challenge = None
         self.last_authentication_result = None
         self.last_authentication_error = None
     def start_authentication(self,username,password):
+        self.pending_username = username
         self.pending_authentication_input = AuthenticationInput(
             username=username,
             password=password
         )
         self.authentication_in_progress = True
-        self.pending_challenges = False
-        self.last_authentication_result = False
-        self.last_authentication_error = False
+        self.pending_challenge = None
+        self.last_authentication_result = None
+        self.last_authentication_error = None
 
     def validate_authentication_input(self):
         if self.pending_authentication_input is None:
@@ -232,10 +236,41 @@ class AuthenticationController:
             username=self.pending_authentication_input.username
         )
 
-    def handle_authentication_challenge(self):
-        pass
-    def handle_authentication_response(self):
-        pass
+    def handle_authentication_challenge(self,client_crypto_service):
+        self.last_authentication_error = None
+        if not self.authentication_in_progress:
+            self.last_authentication_error = "No authentication workflow in progress"
+            return None
+        if self.pending_authentication_input is None:
+            self.last_authentication_error = "Authentication is missing"
+            return None
+        if self.pending_challenge is None:
+            self.last_authentication_error = "Authentication challenge is missing"
+            return None
+        password = self.pending_authentication_input.password
+        authentication_key = client_crypto_service.derive_authentication_key_from_password(password)
+        if authentication_key is None:
+            self.last_authentication_error = "Authentication key derivation failed"
+            return None
+        hmac_response = client_crypto_service.compute_integrity_value(self.pending_challenge,authentication_key)
+        if hmac_response is None:
+            self.last_authentication_error = "Authentication response computation failed"
+            return None
+        return AuthenticationResponseMessage(
+            message_type=MessageType.AUTH_RESP,
+            hmac_response=hmac_response
+        )
+
+
+
+    def handle_authentication_result(self,authentication_result_message):
+        if authentication_result_message is None:
+            self.last_authentication_error = "Authentication result message is missing"
+            self.authentication_in_progress = False
+            return False
+        self.last_authentication_result = authentication_result_message
+        self.authentication_in_progress = False
+        return True
     def complete_authentication(self):
         pass
     def retry_authentication(self):
@@ -334,10 +369,20 @@ class ClientConnectionManager:
         return self.send_application_message(request_message)
     def send_authentication_request(self,authentication_request_message):
         return self.send_application_message(authentication_request_message)
-    def receive_authentication_challenge(self):
-        pass
-    def send_authentication_response(self):
-        pass
+    def receive_authentication_challenge(self,authentication_challenge_message):
+        if authentication_challenge_message is None:
+            return None
+        if authentication_challenge_message.message_type != MessageType.AUTH_CHALLENGE:
+            return None
+        return authentication_challenge_message
+
+    def send_authentication_response(self,authentication_response_message):
+        if authentication_response_message is None:
+            return False
+        if authentication_response_message.message_type != MessageType.AUTH_RESP:
+            return False
+        return self.send_application_message(authentication_response_message)
+
     def secure_packet(self):
         pass
     def start_receive_loop(self):
@@ -388,6 +433,8 @@ class ClientCryptoService:
             "reversed_password_hash":reversed_password_hash
         }
     def derive_authentication_key_from_password(self,password):
+        if password is None or password == "":
+            return None
         password_bytes = password.encode("utf-8")
         password_hash = hashlib.sha3_512(password_bytes).digest()
         hmac_key = password_hash[32:]
@@ -396,8 +443,8 @@ class ClientCryptoService:
         reversed_password = password[::-1]
         reversed_password_bytes = reversed_password.encode("utf-8")
         reverse_hash = hashlib.sha3_512(reversed_password_bytes).digest()
-        response_decryption_key = reverse_hash[:32]
-        response_decryption_iv = reverse_hash[32:48]
+        response_decryption_key = reverse_hash[32:64] #lower half
+        response_decryption_iv = reverse_hash[16:32] #second quarter
         return {
             "response_decryption_key":response_decryption_key,
             "response_decryption_iv":response_decryption_iv,
@@ -421,10 +468,15 @@ class ClientCryptoService:
         return payload_text.encode("utf-8")
     def encrypt_secure_message(self,message):
         pass
-    def compute_integrity_value(self,value):
-        pass
+    def compute_integrity_value(self,message_bytes,integrity_key):
+        if message_bytes is None or integrity_key is None:
+            return None
+        return hmac.new(integrity_key,message_bytes,hashlib.sha3_512).digest()
+
     def verify_integrity_value(self,value,expected_value):
-        return value==expected_value
+        if value is None or expected_value is None:
+            return False
+        return hmac.compare_digest(value, expected_value)
     def verify_digital_signature(self,signature):
         pass
     def decrypt_protected_response(self,protected_response):
@@ -462,7 +514,7 @@ class ConnectionSettingsManager:
         if self.server_ip == "":
             self.configuration_valid = False
             return False
-        if self.server_port <= 0:
+        if self.server_port < 0:
             self.configuration_valid = False
             return False
         self.configuration_valid = True

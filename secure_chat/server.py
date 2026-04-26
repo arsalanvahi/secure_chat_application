@@ -1,5 +1,6 @@
 #server.py should be organized in this order
-
+import hmac
+import secrets
 import socket
 import hashlib
 from enum import Enum
@@ -288,18 +289,88 @@ class AuthenticationService:
         self.current_challenge = None
         self.current_authentication_result = None
         self.last_authentication_error = None
-    def handle_authentication_request(self):
-        pass
-    def validate_authentication_eligibility(self):
-        pass
-    def generate_authentication_challenge(self):
-        pass
-    def send_authentication_challenge(self):
-        pass
-    def receive_authentication_response(self):
-        pass
-    def verify_authentication_response(self):
-        pass
+    def handle_authentication_request(self, request_message, server_crypto_service,enrollment_repository, server_session_manager):
+        self.last_authentication_error = None
+        self.current_authentication_request_context = request_message
+
+        username = request_message.username
+
+        if not self.validate_authentication_eligibility(username,enrollment_repository, server_session_manager):
+            return None
+        challenge_bytes = self.generate_authentication_challenge(server_crypto_service)
+        self.current_challenge = challenge_bytes
+
+
+        return AuthenticationChallengeMessage(
+            message_type=MessageType.AUTH_CHALLENGE,
+            challenge=challenge_bytes
+
+
+        )
+
+    def validate_authentication_eligibility(self,username,enrollment_repository,server_session_manager):
+        if not enrollment_repository.check_whether_username_exists(username):
+            self.last_authentication_error = "Username is not enrolled"
+            return False
+        if server_session_manager.check_whether_username_is_active(username):
+            self.last_authentication_error = "same user name already active"
+            return False
+        return True
+    def generate_authentication_challenge(self,server_crypto_service):
+
+        return server_crypto_service.generate_secure_challenge()
+
+    def send_authentication_challenge(self,authentication_challenge):
+        return authentication_challenge
+    def receive_authentication_response(self,authentication_response_message):
+        if authentication_response_message is None:
+            return None
+        if authentication_response_message.message_type != MessageType.AUTH_RESP:
+            return None
+        return authentication_response_message
+
+
+    def verify_authentication_response(self,authentication_response_message,server_crypto_service,enrollment_repository):
+        if authentication_response_message is None:
+            self.last_authentication_error = "authentication response is missing"
+            return False
+        if self.current_authentication_result is None:
+            self.last_authentication_error = "authentication context is missing"
+            return False
+        if self.current_challenge is None:
+            self.last_authentication_error = "authentication challenge is missing"
+            return False
+
+        username = self.current_authentication_request_context.username
+        enrollment_record = enrollment_repository.retrieve_enrollment_record_by_username(username)
+        if enrollment_record is None:
+            self.last_authentication_error = "enrollment record was not found"
+            return False
+
+        stored_password_hash = enrollment_record.password_hash
+        if stored_password_hash is None:
+            self.last_authentication_error = "Stored hash is missing"
+            return False
+
+        verification_result = server_crypto_service.verify_challenge_response(
+            received_hmac_response=authentication_response_message.hmac_response,
+            challenge=self.current_challenge,
+            stored_password_hash=stored_password_hash
+
+
+        )
+        if not verification_result:
+            self.last_authentication_error = "Authentication Response verification failed"
+            return False
+        return True
+
+
+
+        expected_key = stored_pwd_hash[32:]
+        hmac.compare_digest(expected_key,)
+
+
+
     def determine_authentication_outcome(self):
         pass
     def build_authentication_result(self):
@@ -310,6 +381,9 @@ class AuthenticationService:
         pass
     def send_authentication_result(self):
         pass
+
+
+
 class MessageRelayService:
     def __init__(self):
         self.current_relay_context = None
@@ -541,13 +615,32 @@ class ServerCryptoService:
 
 
     def generate_secure_challenge(self):
-        pass
+        return secrets.token_bytes(16)
 
-    def verify_challenge_response(self):
-        pass
+    def verify_challenge_response(self,received_hmac_response,challenge,stored_password_hash):
+        if received_hmac_response is None:
+            return False
+        if challenge is None:
+            return False
+        if stored_password_hash is None:
+            return False
+        expected_key = stored_password_hash[32:]
+        expected_hmac_response = hmac.new(expected_key,challenge,hashlib.sha3_512).digest()
+        return hmac.compare_digest(received_hmac_response,expected_hmac_response)
 
-    def derive_response_protection_material(self):
-        pass
+
+
+    def derive_response_protection_material(self,stored_reversed_password_hash):
+        if stored_reversed_password_hash is None:
+            return False
+        response_encryption_key = stored_reversed_password_hash[32:64]
+        response_encryption_iv = stored_reversed_password_hash[16:32]
+        return{
+            "response_encryption_key":response_encryption_key,
+            "response_encryption_iv":response_encryption_iv
+            
+        }
+
 
     def encrypt_authentication_result(self):
         pass
