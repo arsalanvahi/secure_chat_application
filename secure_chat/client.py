@@ -43,6 +43,11 @@ class RegistrationInput:
     selected_channel:ChannelName
 
 
+@dataclass
+class AuthenticationInput:
+    username:str
+    password:str
+
 
 # =========================================
 # 1. Client GUI / Presentation
@@ -57,12 +62,18 @@ class ClientAppCoordinator:
         self.active_workflow=None
         self.pending_user_action=None
         self.current_view_context=None
+        self.registration_controller = RegistrationController()
+        self.authentication_controller = AuthenticationController()
     def start_connection_configuration(self):
         pass
     def start_registration_workflow(self):
-        pass
+        self.active_workflow = self.registration_controller
+        self.current_view_context = "registration-mode"
+        self.pending_user_action = None
     def start_authentication_workflow(self):
-        pass
+        self.active_workflow = self.authentication_controller
+        self.current_view_context = "authentication-mode"
+        self.pending_user_action = None
     def start_secure_send_workflow(self):
         pass
     def open_authentication_result_view(self):
@@ -182,16 +193,45 @@ class RegistrationController:
 class AuthenticationController:
     def __init__(self):
         self.pending_username = None
-        self.authentication_in_progress = None
+        self.pending_authentication_input = None
+        self.authentication_in_progress = False
         self.pending_challenges = None
         self.last_authentication_result = None
         self.last_authentication_error = None
-    def start_authentication(self):
-        pass
+    def start_authentication(self,username,password):
+        self.pending_authentication_input = AuthenticationInput(
+            username=username,
+            password=password
+        )
+        self.authentication_in_progress = True
+        self.pending_challenges = False
+        self.last_authentication_result = False
+        self.last_authentication_error = False
+
     def validate_authentication_input(self):
-        pass
+        if self.pending_authentication_input is None:
+            self.last_authentication_error = "No authentication input provided"
+            return False
+        if self.pending_authentication_input.username == "":
+            self.last_authentication_error = "Username is empty"
+            return False
+        if self.pending_authentication_input.password == "":
+            self.last_authentication_error = "Password is empty"
+            return False
+        return True
+
+
     def request_authentication(self):
-        pass
+        if not self.validate_authentication_input():
+            return None
+
+        self.pending_username = self.pending_authentication_input.username
+
+        return AuthenticationRequestMessage(
+            message_type= MessageType.AUTH_REQ,
+            username=self.pending_authentication_input.username
+        )
+
     def handle_authentication_challenge(self):
         pass
     def handle_authentication_response(self):
@@ -292,8 +332,8 @@ class ClientConnectionManager:
 
     def send_registration_request(self,request_message):
         return self.send_application_message(request_message)
-    def send_authentication_request(self):
-        pass
+    def send_authentication_request(self,authentication_request_message):
+        return self.send_application_message(authentication_request_message)
     def receive_authentication_challenge(self):
         pass
     def send_authentication_response(self):

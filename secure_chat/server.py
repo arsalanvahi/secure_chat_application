@@ -364,7 +364,8 @@ class ServerTransportManager:
         self.listening_socket = None
         self.accept_loop_state = False
         self.active_connection_handler_set = {}
-        self.packet_dispatch_registration = {}
+        self.packet_dispatch_registry = {}
+        self.packet_dispatch_authentication = {}
         self.transport_health_state = TransportHealthState()
     def start_accepting_client_connections(self):
         self.accept_loop_state = True
@@ -377,10 +378,12 @@ class ServerTransportManager:
         if packet is None:
             return None
         message_type = getattr(packet,"message_type",None)
-        handler = self.packet_dispatch_registration.get(message_type)
+        handler = self.packet_dispatch_registry.get(message_type)
         if handler is None:
             return None
+
         return handler(connection_id,packet)
+
     def send_response_to_client(self,connection_id, response_bytes):
         return self.send_application_message(connection_id,response_bytes)
     def broadcast_packet_to_recipients(self,recipients_ids,response_bytes):
@@ -393,7 +396,7 @@ class ServerTransportManager:
     def detect_client_disconnect(self,connection_id):
         self.close_session(connection_id)
     def register_transport_handlers(self,handlers):
-        self.packet_dispatch_registration = handlers
+        self.packet_dispatch_registry = handlers
 
     def open_session(self,connection_id,socket_handle,client_address,):
         handle = ConnectionHandle(
@@ -651,6 +654,10 @@ def setup_server():
     registration_service = RegistrationService()
     server_crypto_service = ServerCryptoService()
     enrollment_repository = EnrollmentRepository()
+    authentication_service = AuthenticationService()
+    channel_key_manager = ChannelKeyManager
+    server_session_manager = ServerSessionManager
+
 
     def handle_registration_packet(connection_id, packet):
         return registration_service.handle_registration_request(
@@ -658,15 +665,38 @@ def setup_server():
             server_crypto_service,
             enrollment_repository
         )
+    def handle_authentication_request_packet(connection_id,packet):
+        return authentication_service.handle_authentication_request(
+            packet,
+            server_crypto_service,
+            enrollment_repository,
+            server_session_manager,
+            channel_key_manager)
+
+
 
     server_transport_manager.register_transport_handlers({
-        MessageType.REG_REQ: handle_registration_packet
+        MessageType.REG_REQ: handle_registration_packet,
+        MessageType.AUTH_REQ:handle_authentication_request_packet,
+
     })
 
-    return server_transport_manager, registration_service, server_crypto_service, enrollment_repository
+    return (server_transport_manager,
+            registration_service,
+            server_crypto_service,
+            enrollment_repository,
+            channel_key_manager,
+            authentication_service,
+            server_session_manager)
 
 if __name__ == "__main__":
-    server_transport_manager, registration_service, server_crypto_service, enrollment_repository = setup_server()
+    (server_transport_manager,
+     registration_service,
+     server_crypto_service,
+     enrollment_repository,
+     channel_key_manager,
+     authentication_service,
+     server_session_manager) = setup_server()
     print("Server is configured.")
 
 
