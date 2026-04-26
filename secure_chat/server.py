@@ -3,8 +3,12 @@ import hmac
 import secrets
 import socket
 import hashlib
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad
+
 from enum import Enum
 from dataclasses import dataclass
+
 
 
 
@@ -364,19 +368,117 @@ class AuthenticationService:
             return False
         return True
 
+    def determine_authentication_outcome(self,authentication_response_message,server_crypto_service,enrollment_repository):
+        verification_success = self.verify_authentication_response(
+            authentication_response_message,
+            server_crypto_service,
+            enrollment_repository
+        )
+        self.current_authentication_result = verification_success
+        return verification_success
 
 
-        expected_key = stored_pwd_hash[32:]
-        hmac.compare_digest(expected_key,)
 
 
 
-    def determine_authentication_outcome(self):
-        pass
-    def build_authentication_result(self):
-        pass
-    def protect_authentication_result(self):
-        pass
+    def build_authentication_result(self,authentication_success,channel_key_set = None):
+        if authentication_success:
+            authentication_result = AuthenticationResult(
+                status=AuthStatus.SUCCESS,
+                message="Authentication Successful",
+                channel_available=True,
+                channel_keys_loaded=(channel_key_set is not None)
+
+            )
+        else:
+            authentication_result = AuthenticationResult(
+                status=AuthStatus.FAILURE,
+                message="Authentication failure",
+                channel_available=False,
+                channel_keys_loaded=False
+            )
+        return authentication_result
+
+
+    def protect_authentication_result(self, server_crypto_service, enrollment_repository, channel_key_set=None):
+
+        if self.current_authentication_result is None:
+            self.last_authentication_error = "Authentication result is missing"
+            return None
+
+        if self.current_authentication_request_context is None:
+            self.last_authentication_error = "Authentication request context is missing"
+            return None
+
+        username = self.current_authentication_request_context.username
+        enrollment_record = enrollment_repository.retrieve_enrollment_record_by_username(username)
+
+        if enrollment_record is None:
+            self.last_authentication_error = "Enrollment record was not found"
+            return None
+
+        stored_reversed_password_hash = enrollment_record.reversed_password_hash
+        derived_response_protection_material = server_crypto_service.derive_response_protection_material(stored_reversed_password_hash)
+        if derived_response_protection_material is None:
+            self.last_authentication_error = "Response protection material could not be derived"
+            return None
+
+        status_value = self.current_authentication_result.status
+        if hasattr(status_value, "value"):
+            status_value = status_value.value
+
+        if self.current_authentication_result.channel_keys_loaded and channel_key_set is not None:
+            payload_text = (
+
+                    str(status_value)
+                    + "|"
+                    + self.current_authentication_result.message
+                    + "|"
+                    + str(self.current_authentication_result.channel_available)
+                    + "|"
+                    + str(self.current_authentication_result.channel_keys_loaded)
+                    + "|"
+                    + channel_key_set.aes_key.hex()
+                    + "|"
+                    + channel_key_set.iv.hex()
+                    + "|"
+                    + channel_key_set.hmac_key.hex()
+
+                )
+        else:
+            payload_text = (
+
+                    str(status_value)
+                    + "|"
+                    + self.current_authentication_result.message
+                    + "|"
+                    + str(self.current_authentication_result.channel_available)
+                    + "|"
+                    + str(self.current_authentication_result.channel_keys_loaded)
+                )
+
+            server_crypto_service.pending_authentication_result_plaintext = payload_text.encode("utf-8")
+
+            encrypted_authentication_result = server_crypto_service.encrypt_authentication_result(
+                derived_response_protection_material
+            )
+            if encrypted_authentication_result is None:
+                self.last_authentication_error = "Authentication result encryption failed"
+                return None
+
+            signed_authentication_result = server_crypto_service.sign_response(
+                encrypted_authentication_result
+            )
+            if signed_authentication_result is None:
+                self.last_authentication_error = "Authentication result signing failed"
+                return None
+
+        return AuthenticationResultMessage(
+            message_type=MessageType.AUTH_RES,
+            encrypted_result=encrypted_authentication_result,
+            signature=signed_authentication_result
+        )
+
     def activate_authenticated_session(self):
         pass
     def send_authentication_result(self):
@@ -635,15 +737,34 @@ class ServerCryptoService:
             return False
         response_encryption_key = stored_reversed_password_hash[32:64]
         response_encryption_iv = stored_reversed_password_hash[16:32]
-        return{
-            "response_encryption_key":response_encryption_key,
-            "response_encryption_iv":response_encryption_iv
-            
-        }
+        derived_response_protection_material = DerivedResponseProtectionMaterial(
+            aes_key = response_encryption_key,
+            iv = response_encryption_iv
+        )
+        return derived_response_protection_material
 
 
-    def encrypt_authentication_result(self):
-        pass
+
+    def encrypt_authentication_result(self,derived_response_protection_material,authentication_result,channel_key_set=None):
+        if authentication_result is None:
+            return None
+        if derived_response_protection_material is None:
+            return None
+        response_encryption_key = derived_response_protection_material.response_encryption_key
+        response_encryption_iv = derived_response_protection_material.response_encryption_iv
+        if response_encryption_key is None or response_encryption_iv is None:
+            return None
+        if len(response_encryption_key) != 32:
+            return None
+        if len(response_encryption_iv) != 16:
+            return None
+        cipher = AES.new(response_encryption_key,AES.MODE_CBC,response_encryption_iv)
+        ciphertext = cipher.encrypt(
+            pad(self.pending_authentication_result_plaintext,AES.block_size)
+
+        )
+        return ciphertext
+
 
     def sign_response(self,registration_result):
         if registration_result is None:
