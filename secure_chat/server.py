@@ -410,6 +410,7 @@ class AuthenticationService:
             self.last_authentication_error = "Authentication request context is missing"
             return None
 
+
         username = self.current_authentication_request_context.username
         enrollment_record = enrollment_repository.retrieve_enrollment_record_by_username(username)
 
@@ -417,67 +418,29 @@ class AuthenticationService:
             self.last_authentication_error = "Enrollment record was not found"
             return None
 
+        #Derive response protection material
         stored_reversed_password_hash = enrollment_record.reversed_password_hash
         derived_response_protection_material = server_crypto_service.derive_response_protection_material(stored_reversed_password_hash)
         if derived_response_protection_material is None:
             self.last_authentication_error = "Response protection material could not be derived"
             return None
+        #build plaintext
+        result = self.current_authentication_result
+        plaintext_parts = [
+            result.status.value,
+            result.message,
+            str(result.channel_available),
+            str(result.channel_keys_loaded)
 
-        status_value = self.current_authentication_result.status
-        if hasattr(status_value, "value"):
-            status_value = status_value.value
+        ]
+        if result.channel_keys_loaded is None and channel_key_set is not None:
+            plaintext_parts.extend([
+                channel_key_set.aes_key.hex(),
+                channel_key_set.iv.hex(),
+                channel_key_set.hmac_key.hex()
+            ])
+        plaintext_bytes = "|".join(plaintext_parts).encode("utf-8")
 
-        if self.current_authentication_result.channel_keys_loaded and channel_key_set is not None:
-            payload_text = (
-
-                    str(status_value)
-                    + "|"
-                    + self.current_authentication_result.message
-                    + "|"
-                    + str(self.current_authentication_result.channel_available)
-                    + "|"
-                    + str(self.current_authentication_result.channel_keys_loaded)
-                    + "|"
-                    + channel_key_set.aes_key.hex()
-                    + "|"
-                    + channel_key_set.iv.hex()
-                    + "|"
-                    + channel_key_set.hmac_key.hex()
-
-                )
-        else:
-            payload_text = (
-
-                    str(status_value)
-                    + "|"
-                    + self.current_authentication_result.message
-                    + "|"
-                    + str(self.current_authentication_result.channel_available)
-                    + "|"
-                    + str(self.current_authentication_result.channel_keys_loaded)
-                )
-
-            server_crypto_service.pending_authentication_result_plaintext = payload_text.encode("utf-8")
-
-            encrypted_authentication_result = server_crypto_service.encrypt_authentication_result(
-                derived_response_protection_material
-            )
-            if encrypted_authentication_result is None:
-                self.last_authentication_error = "Authentication result encryption failed"
-                return None
-
-            signed_authentication_result = server_crypto_service.sign_response(
-                encrypted_authentication_result
-            )
-            if signed_authentication_result is None:
-                self.last_authentication_error = "Authentication result signing failed"
-                return None
-
-        return AuthenticationResultMessage(
-            message_type=MessageType.AUTH_RES,
-            encrypted_result=encrypted_authentication_result,
-            signature=signed_authentication_result
-        )
 
     def activate_authenticated_session(self):
         pass
@@ -750,8 +713,8 @@ class ServerCryptoService:
             return None
         if derived_response_protection_material is None:
             return None
-        response_encryption_key = derived_response_protection_material.response_encryption_key
-        response_encryption_iv = derived_response_protection_material.response_encryption_iv
+        response_encryption_key = derived_response_protection_material.aes_key
+        response_encryption_iv = derived_response_protection_material.iv
         if response_encryption_key is None or response_encryption_iv is None:
             return None
         if len(response_encryption_key) != 32:
