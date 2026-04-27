@@ -3,8 +3,15 @@ import hmac
 import secrets
 import socket
 import hashlib
+
 from Crypto.Cipher import AES
+
 from Crypto.Util.Padding import pad
+
+from Crypto.Signature import pkcs1_15
+from Crypto.Hash import SHA3_512
+from Crypto.PublicKey import RSA
+
 
 from enum import Enum
 from dataclasses import dataclass
@@ -157,6 +164,22 @@ class TransportHealthState:
         healthy:bool=True
         last_error:str = ""
 
+@dataclass
+class ServerSessionInfo:
+    connection_id:str
+    username:str
+    authenticated:bool
+    channel:ChannelName
+
+@dataclass
+class ConnectedClientInfo:
+    connection_id:str
+    username:str
+    authenticated:bool
+    channel:ChannelName
+
+
+
 
 
 
@@ -271,8 +294,16 @@ class RegistrationService:
         self.last_registration_result = result
         return result
 
-    def sign_registration_result(self,result,server_crypto_service):
-        return server_crypto_service.sign_response(result)
+    def sign_registration_result(self,registration_result,server_crypto_service):
+        result_text= (
+            f"{registration_result.success}|"
+            f"{registration_result.message}|"
+            f"{registration_result.retry_possible}"
+
+        )
+        result_bytes = result_text.encode("utf-8")
+
+        return server_crypto_service.sign_response(result_bytes)
 
     def send_registration_response(self,result,signature):
         result_code = "SUCCESS" if result.success else "FAILURE"
@@ -338,7 +369,7 @@ class AuthenticationService:
         if authentication_response_message is None:
             self.last_authentication_error = "authentication response is missing"
             return False
-        if self.current_authentication_result is None:
+        if self.current_authentication_request_context is None:
             self.last_authentication_error = "authentication context is missing"
             return False
         if self.current_challenge is None:
@@ -369,13 +400,13 @@ class AuthenticationService:
         return True
 
     def determine_authentication_outcome(self,authentication_response_message,server_crypto_service,enrollment_repository):
-        verification_success = self.verify_authentication_response(
+        authentication_success = self.verify_authentication_response(
             authentication_response_message,
             server_crypto_service,
             enrollment_repository
         )
-        self.current_authentication_result = verification_success
-        return verification_success
+        self.current_authentication_result = authentication_success
+        return authentication_success
 
 
 
@@ -433,19 +464,91 @@ class AuthenticationService:
             str(result.channel_keys_loaded)
 
         ]
-        if result.channel_keys_loaded is None and channel_key_set is not None:
+        if result.channel_keys_loaded and channel_key_set is not None:
             plaintext_parts.extend([
                 channel_key_set.aes_key.hex(),
                 channel_key_set.iv.hex(),
                 channel_key_set.hmac_key.hex()
             ])
         plaintext_bytes = "|".join(plaintext_parts).encode("utf-8")
+        ciphertext = server_crypto_service.encrypt_authentication_result(
+            derived_response_protection_material,
+            plaintext_bytes
+        )
+        if ciphertext is None:
+            self.last_authentication_error = "Encryption failed"
+            return None
+
+        #sign
+        signature = server_crypto_service.sign_response(ciphertext)
+        if signature is None:
+            self.last_authentication_error = "signing failed"
+            return None
+        #Return Protocol Message
+        return AuthenticationResultMessage(
+            message_type=MessageType.AUTH_RES,
+            encrypted_result=ciphertext,
+            signature=signature
+
+        )
 
 
-    def activate_authenticated_session(self):
-        pass
-    def send_authentication_result(self):
-        pass
+
+
+    def activate_authenticated_session(self,server_session_manager,enrollment_repository):
+        if self.current_authentication_result is None:
+            self.last_authentication_error = "Authentication result missing"
+            return False
+        if self.current_authentication_result.status != AuthStatus.SUCCESS:
+            return False
+        if self.current_authentication_request_context is None:
+            self.last_authentication_error = "Authentication request context is missing"
+            return False
+        #extract identity
+        username = self.current_authentication_request_context.username
+        connection_id = self.current_connection_id
+
+        #Bind connection to username
+        server_session_manager.bind_connection_to_identity(connection_id,username)
+
+        #mark session authenticated
+        server_session_manager.mark_session_authenticated(connection_id)
+        #register channel participation
+        enrollment_record = enrollment_repository.retrieve_enrollment_record_by_username(username)
+        if enrollment_record:
+            server_session_info = ServerSessionInfo(
+                connection_id=connection_id,
+                username=username,
+                authenticated=True,
+                channel=enrollment_record.subscribed_channel
+            )
+
+            connected_client_info = ConnectedClientInfo(
+                connection_id=connection_id,
+                username=username,
+                authenticated=True,
+                channel=enrollment_record.subscribed_channel
+            )
+
+            server_session_manager.add_connections(
+                server_session_info,
+                connected_client_info
+            )
+        return True
+
+
+
+
+
+    def send_authentication_result(self,authentication_result_message):
+        if authentication_result_message is None:
+            self.last_authentication_error = "Authentication result message is failing"
+            return None
+        if authentication_result_message.message_type != MessageType.AUTH_RES:
+            self.last_authentication_error = "Invalid authentication response message"
+            return None
+        return authentication_result_message
+
 
 
 
@@ -723,30 +826,22 @@ class ServerCryptoService:
             return None
         cipher = AES.new(response_encryption_key,AES.MODE_CBC,response_encryption_iv)
         ciphertext = cipher.encrypt(
-            pad(self.pending_authentication_result_plaintext,AES.block_size)
+            pad(authentication_result,AES.block_size)
 
         )
         return ciphertext
 
 
-    def sign_response(self,registration_result):
-        if registration_result is None:
+    def sign_response(self,data:bytes) ->bytes:
+        if data is None:
             return None
-        result_text = (
-            f"{registration_result.success}|"
-            f"{registration_result.message}|"
-            f"{registration_result.retry_possible}"
-
-
-        )
-        result_bytes = result_text.encode("utf-8")
-        if self.loaded_rsa_signing_key_pair is not None:
-            signing_key=  self.loaded_rsa_signing_key_pair["signing_private_key"]
-            signature = hashlib.sha3_512(signing_key+result_bytes).digest()
-            return signature
-        return hashlib.sha3_512(result_bytes).digest()
-
-
+        if not self.loaded_rsa_signing_key_pair:
+            return None
+        private_key_bytes = self.loaded_rsa_signing_key_pair["signing_private_key"]
+        private_key = RSA.importKey(private_key_bytes)
+        h = SHA3_512.new(data)
+        signature = pkcs1_15.new(private_key).sign(h)
+        return signature
 
     def derive_channel_key_material(self):
         pass
@@ -757,32 +852,150 @@ class ServerCryptoService:
 # =========================================
 class ServerSessionManager:
     def __init__(self):
-        self.active_connections = None
-        self.authenticated_sessions = None
-        self.online_users = None
-        self.username_to_session_mapping = None
-        self.connection_to_user_mapping = None
-        self.channel_participants = None
-    def add_connections(self):
-        pass
-    def remove_connections(self):
-        pass
-    def bind_connection_to_identy(self):
-        pass
-    def mark_session_authenticated(self):
-        pass
-    def check_whether_username_is_active(self):
-        pass
-    def get_session_by_identifier(self):
-        pass
+        self.active_connections = {}
+        self.authenticated_sessions = set()
+        self.online_users = set()
+        self.username_to_session_mapping = {}
+        self.connection_to_user_mapping = {}
+        self.channel_participants = {
+            ChannelName.IF100:set(),
+            ChannelName.MATH101:set(),
+            ChannelName.SPS101:set()
+        }
+    def add_connections(self,server_session_info,connected_client_info):
+        connection_id = server_session_info.connection_id
+        username = server_session_info.username
+        channel = server_session_info.channel
+
+        #track active connections
+        self.active_connections[connection_id] = server_session_info
+
+        #track online user
+        if username is not None:
+            self.online_users.add(username)
+            self.username_to_session_mapping[username] = connection_id
+            self.connection_to_user_mapping[connection_id] = username
+
+        #track channel participants
+        if channel is not None:
+            if channel not in self.channel_participants:
+                self.channel_participants[channel] = set()
+            self.channel_participants[channel].add(connection_id)
+        #track authentication session
+        if server_session_info.authenticated:
+            self.authenticated_sessions.add(connection_id)
+
+
+
+    def remove_connections(self,connection_id):
+        #removes a connection and all related runtime state.
+        #called when a client disconnects or on clean up.
+        if connection_id is None:
+            return False
+        session_info = self.active_connections.pop(connection_id,None)
+        self.authenticated_sessions.discard(connection_id)
+        username = self.connection_to_user_mapping.pop(connection_id,None)
+        if username is not None:
+            self.username_to_session_mapping.pop(username,None)
+            self.online_users.discard(username)
+        if session_info and session_info.channel is not None:
+            channel_set = self.channel_participants.get(session_info.channel)
+            if channel_set:
+                channel_set.discard(connection_id)
+        return True
+
+    def bind_connection_to_identity(self,connection_id:str,username:str):
+        if connection_id is None or username is None:
+            return False
+        #find duplicate login username
+        if username in self.username_to_session_mapping:
+            return False
+        #ensure connection exists
+        session_info = self.active_connections.get(connection_id)
+        if session_info is None:
+            return False
+        #bind identity
+        session_info.username = username
+
+        self.connection_to_user_mapping[connection_id] = username
+        self.username_to_session_mapping[username] = connection_id
+        self.online_users.add(username)
+
+        return True
+
+
+    def mark_session_authenticated(self,connection_id):
+        session_info = self.active_connections.get(connection_id)
+        if session_info is None:
+            return None
+        session_info.authenticated =True
+        self.authenticated_sessions.add(connection_id)
+        return True
+    def check_whether_username_is_active(self,username):
+        return username in self.username_to_session_mapping
+    def get_session_by_identifier(self,connection_id):
+
+        #retrieve the ServerSessionInfo for a given connection identifier
+        if connection_id is None:
+            return None
+        return self.active_connections.get(connection_id)
+
+
     def get_connected_clients(self):
-        pass
+        connected_clients = []
+        for session_info in self.active_connections.values():
+            client_info = ConnectedClientInfo(
+                connection_id=session_info.connection_id,
+                username=session_info.username,
+                authenticated=session_info.authenticated,
+                channel=session_info.channel
+            )
+            connected_clients.append(client_info)
+        return connected_clients
+
+
     def get_authenticated_clients(self):
-        pass
-    def resolve_recipients_for_channel(self):
-        pass
+        authenticated_clients = []
+        for connection_id in self.authenticated_sessions:
+            session_info = self.active_connections.get(connection_id)
+            if session_info is None:
+                continue
+            client_info = ConnectedClientInfo(
+                connection_id=session_info.connection_id,
+                username=session_info.username,
+                authenticated=session_info.authenticated,
+                channel=session_info.channel
+            )
+            authenticated_clients.append(client_info)
+
+        return authenticated_clients
+
+    def resolve_recipients_for_channel(self,channel):
+        #Returns a list of connection_ids for authenticated clients subscribed to the
+        #given channel
+        if channel is None:
+            return []
+        recipients = []
+        channel_connections = self.channel_participants.get(channel)
+        if not channel_connections:
+            return []
+        for connection_id in channel_connections:
+            if connection_id in self.authenticated_sessions:
+                recipients.append(connection_id)
+
+        return recipients
+
+
+
     def clear_all_sessions(self):
-        pass
+        self.active_connections.clear()
+        self.authenticated_sessions.clear()
+        self.online_users.clear()
+        self.username_to_session_mapping.clear()
+        self.connection_to_user_mapping.clear()
+
+        for channel in self.channel_participants:
+            self.channel_participants[channel].clear()
 
 class ServerRuntimeContext:
     def __init__(self):
@@ -832,29 +1045,71 @@ def setup_server():
     server_crypto_service = ServerCryptoService()
     enrollment_repository = EnrollmentRepository()
     authentication_service = AuthenticationService()
-    channel_key_manager = ChannelKeyManager
-    server_session_manager = ServerSessionManager
-
-
+    channel_key_manager = ChannelKeyManager()
+    server_session_manager = ServerSessionManager()
+#########################################################
     def handle_registration_packet(connection_id, packet):
         return registration_service.handle_registration_request(
             packet,
             server_crypto_service,
             enrollment_repository
         )
-    def handle_authentication_request_packet(connection_id,packet):
+###################################################################
+    def handle_authentication_request_packet(connection_id, packet):
         return authentication_service.handle_authentication_request(
             packet,
             server_crypto_service,
             enrollment_repository,
-            server_session_manager,
-            channel_key_manager)
+            server_session_manager
+        )
+#############################################################
+
+    def handle_authentication_response_packet(connection_id, packet):
+        # ✅ ALWAYS capture transport context
+        authentication_service.current_connection_id = connection_id
+
+        # 1. Verify authentication response
+        authentication_success = authentication_service.verify_authentication_response(
+            packet,
+            server_crypto_service,
+            enrollment_repository
+        )
+
+        # 2. Build AuthenticationResult object
+        auth_result = authentication_service.build_authentication_result(
+            authentication_success
+        )
+
+        authentication_service.current_authentication_result = auth_result
+
+        # 3. Protect (encrypt + sign)
+        protected_message = authentication_service.protect_authentication_result(
+            server_crypto_service,
+            enrollment_repository
+        )
+
+        print("[SERVER DEBUG] Returning AUTH_RES object:", protected_message)
+
+        if protected_message is None:
+            return None
+
+        # 4. Activate session if successful
+        if authentication_success:
+            authentication_service.activate_authenticated_session(
+                server_session_manager,
+                enrollment_repository
+            )
+
+        # 5. Return AUTH_RES
+        return protected_message
 
 
 
     server_transport_manager.register_transport_handlers({
         MessageType.REG_REQ: handle_registration_packet,
         MessageType.AUTH_REQ:handle_authentication_request_packet,
+        MessageType.AUTH_RESP:handle_authentication_response_packet  # ✅ ADD THIS
+
 
     })
 
