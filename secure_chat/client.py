@@ -1,4 +1,11 @@
 #client.py should be organized in this order
+
+import hmac
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
+from Crypto.Signature import pkcs1_15
+from Crypto.Hash import SHA3_512
+from Crypto.PublicKey import RSA
 import hashlib
 import hmac
 from dataclasses import dataclass
@@ -477,7 +484,7 @@ class ClientCryptoService:
         if value is None or expected_value is None:
             return False
         return hmac.compare_digest(value, expected_value)
-    def verify_digital_signature(self,signature):
+    def verify_digital_signature(self,authentication_result_message,):
         pass
     def decrypt_protected_response(self,protected_response):
         pass
