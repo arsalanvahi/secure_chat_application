@@ -14,7 +14,7 @@ from Crypto.PublicKey import RSA
 
 
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 
 
 
@@ -186,7 +186,7 @@ class ServerStatus:
     startup_in_progress:bool
     shutdown_in_progress:bool
     ready_to_accept_connections:bool
-    port: int
+    port: int | None
     message:str
     error:str
 
@@ -220,6 +220,32 @@ class LifecycleResult:
     error:str
     listening:bool=False
     running:bool=False
+
+@dataclass
+class MonitoringSnapshot:
+    running:bool = False
+    listening:bool=False
+    connected_clients_count:int=0
+    authenticated_clients_count:int=0
+    available_channels: dict=field(default_factory=dict)
+    transport_healthy:bool = True
+
+@dataclass
+class RuntimeStructureRegistry:
+    structures:dict = field(default_factory = dict)
+
+@dataclass
+class RetryRecoveryState:
+    retry_allowed:bool=False
+    recovery_needed:bool=False
+    partial_cleanup_required:bool=False
+    last_recovery_error:str=""
+
+@dataclass
+class ChannelAvailabilityState:
+    if100_available:bool=False
+    math101_available:bool=False
+    sps101_available:bool=False
 
 
 
@@ -255,8 +281,6 @@ class ServerAppCoordinator:
         self.last_admin_action_result = None
     def start_server(self,port):
         if port is None:
-            return False
-        if port  in None:
             self.current_administrative_workflow_context = AdminOperationalContext(
                 requested_operation="Start server",
                 requested_port=None,
@@ -279,7 +303,7 @@ class ServerAppCoordinator:
                 error= "Port is missing"
 
             )
-        if not isinstance(port,int) or port<= 0 or port >= 65535:
+        if not isinstance(port,int) or port<= 0 or port > 65535:
             self.current_administrative_workflow_context = AdminOperationalContext(
                 requested_operation="start server",
                 requested_port=port,
@@ -314,8 +338,8 @@ class ServerAppCoordinator:
         self.pending_admin_operation = "start_server"
         self.last_admin_action_result = "server startup requested"
         return ServerStatus(
-            listening=True,
-            running=True,
+            listening=False,
+            running=False,
             startup_in_progress=True,
             shutdown_in_progress=False,
             ready_to_accept_connections=True,
@@ -691,10 +715,10 @@ class MessageRelayService:
         pass
 class ChannelKeyManager:
     def __init__(self):
-        self.per_channel_aes_keys = None
-        self.per_channel_ivs = None
-        self.per_channel_hmac_keys = None
-        self.channel_available_flags = False
+        self.per_channel_aes_keys = {}
+        self.per_channel_ivs = {}
+        self.per_channel_hmac_keys = {}
+        self.channel_available_flags = ChannelAvailabilityState()
         self.key_generation_status = False
     def validate_channel_key_generation_request(self):
         pass
@@ -704,14 +728,42 @@ class ChannelKeyManager:
         pass
     def retrieve_channel_keys(self):
         pass
-    def check_channel_availability(self):
-        pass
-    def mark_channel_available(self):
-        pass
-    def mark_channel_unavailable(self):
-        pass
+    def check_channel_availability(self,channel_name):
+        if channel_name is None:
+            return False
+        if channel_name == ChannelName.IF100:
+            return self.channel_available_flags.if100_available
+        if channel_name == ChannelName.MATH101:
+            return self.channel_available_flags.math101_available
+        if channel_name == ChannelName.SPS101:
+            return self.channel_available_flags.sps101_available
+        return False
+
+
+
+
+    def mark_channel_available(self,channel_name):
+        if channel_name ==ChannelName.IF100:
+            self.channel_available_flags.if100_available = True
+        elif channel_name==ChannelName.MATH101:
+            self.channel_available_flags.math101_available = True
+        elif channel_name == ChannelName.SPS101:
+            self.channel_available_flags.sps101_available = True
+
+    def mark_channel_unavailable(self,channel_name):
+        if channel_name == ChannelName.IF100:
+            self.channel_available_flags.if100_available = False
+        elif channel_name == ChannelName.MATH101:
+            self.channel_available_flags.math101_available = False
+        elif channel_name == ChannelName.SPS101:
+            self.channel_available_flags.sps101_available = False
+
     def clear_channel_keys(self):
-        pass
+        self.per_channel_aes_keys.clear()
+        self.per_channel_ivs.clear()
+        self.per_channel_hmac_keys.clear()
+        self.channel_available_flags =ChannelAvailabilityState()
+        self.key_generation_status = False
 
 
 
@@ -728,10 +780,28 @@ class ServerTransportManager:
         self.packet_dispatch_authentication = {}
         self.transport_health_state = TransportHealthState()
     def start_accepting_client_connections(self):
+        if self.listening_socket is None:
+            self.accept_loop_state = False
+            self.transport_health_state.healthy = False
+            self.transport_health_state.last_error = "Listening socket is not initialized"
+            return False
+
         self.accept_loop_state = True
+        self.transport_health_state.healthy = True
+        self.transport_health_state.last_error = ""
+
+        return True
+
+
+
+
 
     def stop_accepting_client_connections(self):
         self.accept_loop_state = False
+        self.transport_health_state.healthy = True
+        self.transport_health_state.last_error = ""
+        return error
+
     def receive_client_packet(self,connection_id):
         return self.receive_application_message(connection_id)
     def dispatch_incoming_packet(self,connection_id, packet):
@@ -844,6 +914,7 @@ class ServerLifecycleManager:
             self.shutdown_in_progress = False
 
             self.last_lifecycle_result = LifecycleResult(
+                success=True,
                 message="runtime initialized successfully",
                 error ="",
                 listening=False,
@@ -863,21 +934,164 @@ class ServerLifecycleManager:
                 running=False
                 )
             return self.last_lifecycle_result
-        
 
 
-    def bind_and_listen(self):
-        pass
+
+    def bind_and_listen(self,port,server_transport_manager):
+        if port is None:
+            self.last_lifecycle_error = "listening port is missing"
+            self.lifecycle_phase = "failed"
+            self.startup_in_progress = False
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="bind/listen failed",
+                error= "listening port is missing",
+                listening=False,
+                running=False
+            )
+            return self.last_lifecycle_result
+        if not isinstance(port,int) or port <= 0 or port > 65535:
+            self.last_lifecycle_error = "Invalid listening port"
+            self.lifecycle_phase = "failed"
+            self.startup_in_progress = False
+
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="Bind/listen failed",
+                error="Invalid listening port",
+                listening=False,
+                running=False
+            )
+            return self.last_lifecycle_result
+
+        if server_transport_manager is None:
+            self.last_lifecycle_error = "Transport manager is missing"
+            self.lifecycle_phase = "failed"
+            self.startup_in_progress = False
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="Bind/listen failed",
+                error="Transport manager is missing",
+                listening=False,
+                running=False
+            )
+            return self.last_lifecycle_result
+        try:
+            self.lifecycle_phase = "binding"
+
+            listening_socket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+            listening_socket.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+            listening_socket.bind(("",port))
+            listening_socket.listen()
+
+            server_transport_manager.listening_socket = listening_socket
+            server_transport_manager.start_accepting_client_connections()
+
+            self.last_lifecycle_error = None
+
+            self.last_lifecycle_result = LifecycleResult(
+            success=True,
+            message="Server bound and listening successfully",
+            error="",
+            listening=True,
+            running=False
+            )
+            return self.last_lifecycle_result
+        except Exception as error:
+            self.lifecycle_phase = "failed"
+            self.startup_in_progress = False
+            self.last_lifecycle_error = str(error)
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="Bind/listen failed",
+                error=str(error),
+                listening=False,
+                running=False
+
+            )
+            return self.last_lifecycle_result
+
+
     def enter_running_state(self):
-        pass
+        try:
+            self.lifecycle_phase = "running"
+            self.startup_in_progress = False
+            self.shutdown_in_progress = False
+            self.last_lifecycle_error = None
+
+            self.last_lifecycle_result = LifecycleResult(
+                success=True,
+                message="server is running",
+                error="",
+                listening=True,
+                running=True
+                )
+            return self.last_lifecycle_result
+        except Exception as error:
+            self.lifecycle_phase = "failed"
+            self.startup_in_progress = False
+            self.last_lifecycle_error = str(error)
+
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="failed to enter running state",
+                error= str(error),
+                listening=False,
+                running=False
+            )
+            return self.last_lifecycle_result
+
     def begin_shutdown(self):
         pass
     def stop_accepting_new_connections(self):
         pass
     def terminate_active_sessions(self):
         pass
-    def release_runtime_resources(self):
-        pass
+    def release_runtime_resources(self,server_transport_manager,server_runtime_context,channel_key_manager=None):
+        try:
+            # Release transport listening socket
+            if server_transport_manager is not None:
+                if server_transport_manager.listening_socket is not None:
+                    try:
+                        server_transport_manager.listening_socket.close()
+                    except Exception:
+                        pass
+                    server_transport_manager.listening_socket = None
+
+
+                server_transport_manager.accept_loop_state = False
+                server_transport_manager.transport_health_state.healthy = True
+                server_transport_manager.transport_health_state.last_error = ""
+
+                # Clear runtime context
+            if server_runtime_context is not None:
+                server_runtime_context.clear_runtime_state()
+
+
+            # Clear runtime-only channel key material if provided
+            if channel_key_manager is not None:
+                channel_key_manager.clear_channel_keys()
+
+            self.last_lifecycle_error = None
+            self.last_lifecycle_result = LifecycleResult(
+                success=True,
+                message="Runtime resources released successfully",
+                error="",
+                listening=False,
+                running=False
+            )
+            return self.last_lifecycle_result
+
+        except Exception as error:
+            self.last_lifecycle_error = str(error)
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="Failed to release runtime resources",
+                error=str(error),
+                listening=False,
+            )
+
+
     def finalize_shutdown(self):
         pass
     def get_lifecycle_state(self):
@@ -1163,15 +1377,37 @@ class ServerSessionManager:
 
 class ServerRuntimeContext:
     def __init__(self):
-        self.lifecycle_state_snapshot = None
-        self.active_runtime_structure_registry = None
-        self.channel_availability_snapshot = None
-        self.monitoring_snapshot = None
-        self.retry_recovery_flags = None
+        self.lifecycle_state_snapshot = ServerLifecycleState(
+            lifecycle_phase="stopped",
+            startup_in_progress=False,
+            shutdown_in_progress=False,
+            running=False,
+            listening=False,
+            last_lifecycle_result="",
+            last_lifecycle_error=""
+            )
+        self.active_runtime_structure_registry = RuntimeStructureRegistry()
+        self.channel_availability_snapshot = {
+            ChannelName.IF100:False,
+            ChannelName.MATH101:False,
+            ChannelName.SPS101:False
+        }
+        self.monitoring_snapshot = MonitoringSnapshot()
+        self.retry_recovery_flags = RetryRecoveryState()
     def get_lifecycle_state(self):
         pass
-    def set_lifecycle_state(self):
-        pass
+    def set_lifecycle_state(self,lifecycle_state):
+        if lifecycle_state is None:
+            return False
+
+        self.lifecycle_state_snapshot = lifecycle_state
+
+        if self.monitoring_snapshot is not None:
+            self.monitoring_snapshot.running = lifecycle_state.running
+            self.monitoring_snapshot.listening = lifecycle_state.listening
+
+        return True
+
     def register_runtime_structure(self):
         pass
     def retrieve_runtime_structure(self):
