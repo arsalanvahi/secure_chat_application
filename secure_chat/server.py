@@ -195,7 +195,7 @@ class ServerStatus:
 @dataclass
 class AdminOperationalContext:
     requested_operation:str
-    requested_port:int
+    requested_port:int|None
     startup_allowed:bool = False
     shutdown_allowed:bool = False
     operation_in_progress:bool=False
@@ -283,7 +283,7 @@ class ServerAppCoordinator:
         if port is None:
             self.current_administrative_workflow_context = AdminOperationalContext(
                 requested_operation="Start server",
-                requested_port=None,
+                requested_port =  None,
                 startup_allowed=False,
                 shutdown_allowed=True,
                 operation_in_progress=False,
@@ -342,7 +342,7 @@ class ServerAppCoordinator:
             running=False,
             startup_in_progress=True,
             shutdown_in_progress=False,
-            ready_to_accept_connections=True,
+            ready_to_accept_connections=False,
             port=port,
             message="server startup in progress",
             error=""
@@ -800,7 +800,7 @@ class ServerTransportManager:
         self.accept_loop_state = False
         self.transport_health_state.healthy = True
         self.transport_health_state.last_error = ""
-        return error
+        return True
 
     def receive_client_packet(self,connection_id):
         return self.receive_application_message(connection_id)
@@ -1089,7 +1089,9 @@ class ServerLifecycleManager:
                 message="Failed to release runtime resources",
                 error=str(error),
                 listening=False,
+                running=False
             )
+            return self.last_lifecycle_result
 
 
     def finalize_shutdown(self):
