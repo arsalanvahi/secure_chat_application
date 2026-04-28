@@ -203,6 +203,31 @@ class AdminOperationalContext:
     last_operation_error:str=""
 
 
+@dataclass
+class ServerLifecycleState:
+    lifecycle_phase: str
+    startup_in_progress:bool=False
+    shutdown_in_progress:bool=False
+    running:bool=False
+    listening:bool=False
+    last_lifecycle_result:str=""
+    last_lifecycle_error:str=""
+
+@dataclass
+class LifecycleResult:
+    success:bool
+    message:str
+    error:str
+    listening:bool=False
+    running:bool=False
+
+
+
+
+
+
+
+
 
 
 
@@ -812,7 +837,35 @@ class ServerLifecycleManager:
 
 
     def initialize_runtime(self):
-        pass
+        try:
+            self.last_lifecycle_result = None
+            self.lifecycle_phase = "initializing"
+            self.startup_in_progress = True
+            self.shutdown_in_progress = False
+
+            self.last_lifecycle_result = LifecycleResult(
+                message="runtime initialized successfully",
+                error ="",
+                listening=False,
+                running=False
+                )
+            return self.last_lifecycle_result
+        except Exception as error:
+            self.lifecycle_phase = "failed"
+            self.startup_in_progress = False
+            self.last_lifecycle_error = str(error)
+
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="Runtime initialization failed",
+                error = str(error),
+                listening=False,
+                running=False
+                )
+            return self.last_lifecycle_result
+        
+
+
     def bind_and_listen(self):
         pass
     def enter_running_state(self):
