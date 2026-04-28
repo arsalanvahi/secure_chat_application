@@ -270,14 +270,36 @@ class AuthenticationController:
 
 
 
-    def handle_authentication_result(self,authentication_result_message):
+    def handle_authentication_result(self,authentication_result_message,client_crypto_service):
         if authentication_result_message is None:
             self.last_authentication_error = "Authentication result message is missing"
             self.authentication_in_progress = False
             return False
-        self.last_authentication_result = authentication_result_message
-        self.authentication_in_progress = False
+        #verify server signature
+        if not client_crypto_service.verify_digital_signature(
+            authentication_result_message,
+            client_crypto_service.server_signature_verification_public_keys
+        ):
+            self.last_authentication_error = "Invalid server signature"
+            return False
+        #derive AES key + IV from reversed password hash
+        derived_material = client_crypto_service.derive_response_decryption_material_from_password(self.pending_authentication_input.password)
+
+
+        #Decrypt response
+        plaintext = client_crypto_service.decrypt_protected_response(authentication_result_message=authentication_result_message,
+                                                                     derived_material=derived_material)
+        #pars plaintext
+        pars = plaintext.split("|")
+        self.last_authentication_result = AuthenticationResult(
+            status=AuthStatus(pars[0]),
+            message=pars[1],
+            channel_available=(pars[2]=="True"),
+            channel_keys_loaded=(pars[3]=="True")
+        )
         return True
+
+
     def complete_authentication(self):
         pass
     def retry_authentication(self):
@@ -484,10 +506,36 @@ class ClientCryptoService:
         if value is None or expected_value is None:
             return False
         return hmac.compare_digest(value, expected_value)
-    def verify_digital_signature(self,authentication_result_message,):
-        pass
-    def decrypt_protected_response(self,protected_response):
-        pass
+    def verify_digital_signature(self,authentication_result_message,server_public_key_bytes):
+        if authentication_result_message is None:
+            return False
+        if authentication_result_message.encrypted_result is None:
+            return False
+        if authentication_result_message.signature is None:
+            return False
+        try:
+            public_key = RSA.importKey(server_public_key_bytes)
+            h = SHA3_512.new(authentication_result_message.encrypted_result)
+            pkcs1_15.new(public_key).verify(h,authentication_result_message.signature)
+            return True
+        except(valueError,TypeError):
+            return False
+
+    def decrypt_protected_response(self,authentication_result_message,derived_material):
+        #decrypt AES-CBC encrypted authenticated result
+        if authentication_result_message is None:
+            return None
+        if derived_material is None:
+            return None
+        cipher = AES.new(
+            derived_material["response_decryption_key"],
+            AES.MODE_CBC,
+            derived_material["response_decryption_iv"]
+        )
+        plaintext_padded = cipher.decrypt(authentication_result_message.encrypted_result)
+        plaintext = unpad(plaintext_padded,AES.block_size)
+        return plaintext.decode("utf-8")
+
     def decrypt_incoming_message(self,message):
         pass
 
