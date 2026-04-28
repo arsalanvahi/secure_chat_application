@@ -179,6 +179,31 @@ class ConnectedClientInfo:
     channel:ChannelName
 
 
+@dataclass
+class ServerStatus:
+    listening:bool
+    running:bool
+    startup_in_progress:bool
+    shutdown_in_progress:bool
+    ready_to_accept_connections:bool
+    port: int
+    message:str
+    error:str
+
+
+
+@dataclass
+class AdminOperationalContext:
+    requested_operation:str
+    requested_port:int
+    startup_allowed:bool = False
+    shutdown_allowed:bool = False
+    operation_in_progress:bool=False
+    last_operation_result:str=""
+    last_operation_error:str=""
+
+
+
 
 
 
@@ -203,8 +228,76 @@ class ServerAppCoordinator:
         self.current_administrative_workflow_context = None
         self.pending_admin_operation = None
         self.last_admin_action_result = None
-    def start_server(self):
-        pass
+    def start_server(self,port):
+        if port is None:
+            return False
+        if port  in None:
+            self.current_administrative_workflow_context = AdminOperationalContext(
+                requested_operation="Start server",
+                requested_port=None,
+                startup_allowed=False,
+                shutdown_allowed=True,
+                operation_in_progress=False,
+                last_operation_result="Startup Rejected",
+                last_operation_error="Port is missing"
+            )
+            self.pending_admin_operation = None
+            self.last_admin_action_result = "server cannot start"
+            return ServerStatus(
+                listening=False,
+                running=False,
+                startup_in_progress=False,
+                shutdown_in_progress=False,
+                ready_to_accept_connections=False,
+                port= None,
+                message="server not started",
+                error= "Port is missing"
+
+            )
+        if not isinstance(port,int) or port<= 0 or port >= 65535:
+            self.current_administrative_workflow_context = AdminOperationalContext(
+                requested_operation="start server",
+                requested_port=port,
+                startup_allowed=False,
+                shutdown_allowed=True,
+                operation_in_progress=False,
+                last_operation_result="Startup rejected",
+                last_operation_error="Invalid Port"
+            )
+            self.pending_admin_operation = None
+            self.last_admin_action_result = "Server cannot start"
+            return ServerStatus(
+                listening=False,
+                running=False,
+                startup_in_progress=False,
+                shutdown_in_progress=False,
+                ready_to_accept_connections=False,
+                port=port,
+                message="Server not started",
+                error="Invalid Port"
+                )
+        #startup request accepted
+        self.current_administrative_workflow_context = AdminOperationalContext(
+            requested_operation="start server",
+            requested_port=port,
+            startup_allowed=True,
+            shutdown_allowed=True,
+            operation_in_progress=True,
+            last_operation_result="startup requested",
+            last_operation_error=""
+            )
+        self.pending_admin_operation = "start_server"
+        self.last_admin_action_result = "server startup requested"
+        return ServerStatus(
+            listening=True,
+            running=True,
+            startup_in_progress=True,
+            shutdown_in_progress=False,
+            ready_to_accept_connections=True,
+            port=port,
+            message="server startup in progress",
+            error=""
+        )
     def stop_server(self):
         pass
     def trigger_channel_key_generation(self):
@@ -698,8 +791,26 @@ class ServerLifecycleManager:
         self.shutdown_in_progress = False
         self.last_lifecycle_result = None
         self.last_lifecycle_error = None
-    def validate_startup_request(self):
-        pass
+    def validate_startup_request(self,server_status):
+        if server_status is None:
+            self.last_lifecycle_error = "server status is missing"
+            return False
+        if server_status.listening:
+            self.last_lifecycle_error = "Server is already listening"
+            return False
+        if server_status.running:
+            self.last_lifecycle_error = "Server is already running"
+            return False
+        if server_status.startup_in_progress:
+            self.last_lifecycle_error = "Startup is already in progress"
+            return False
+        if server_status.shutdown_in_progress:
+            self.last_lifecycle_error = "Shutdown in progress"
+            return False
+
+        return True
+
+
     def initialize_runtime(self):
         pass
     def bind_and_listen(self):
