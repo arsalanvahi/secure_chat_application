@@ -374,8 +374,86 @@ class ServerAppCoordinator:
             error=""
 
         )
-    def trigger_channel_key_generation(self):
-        pass
+    def trigger_channel_key_generation(
+            self,
+            channel_name,
+            master_secret,
+            channel_key_manager,
+            server_crypto_service,
+            server_runtime_context
+    ):
+        self.pending_admin_operation = "generate_channel_key"
+        self.last_admin_action_result = None
+
+        self.current_administrative_workflow_context = AdminOperationalContext(
+            requested_operation="generate_channel_key",
+            requested_port=None,
+            startup_allowed=False,
+            shutdown_allowed=True,
+            operation_in_progress=True,
+            last_operation_result="channel key generation requested",
+            last_operation_error=""
+            )
+        if channel_key_manager is None:
+            self.current_administrative_workflow_context.operation_in_progress = False
+            self.current_administrative_workflow_context.last_operation_result = "Channel Key generation failed"
+            self.current_administrative_workflow_context.last_operation_error = "Channel key manager is missing"
+            self.last_admin_action_result = "Channel key Generation failed"
+            return False
+        if server_crypto_service is None:
+            self.current_administrative_workflow_context.operation_in_progress = False
+            self.current_administrative_workflow_context.last_operation_result = "Channel Key generation failed"
+            self.current_administrative_workflow_context.last_operation_error = "Server crypto service is missing"
+            self.last_admin_action_result = "Channel key Generation failed"
+            return False
+
+        if server_runtime_context is None:
+            self.current_administrative_workflow_context.operation_in_progress = False
+            self.current_administrative_workflow_context.last_operation_result = "Channel Key generation failed"
+            self.current_administrative_workflow_context.last_operation_error = "Server runtime context is missing"
+            self.last_admin_action_result = "Channel key Generation failed"
+            return False
+
+        #validate request
+        request_valid = channel_key_manager.validate_channel_key_generation_request(
+            channel_name,
+            master_secret
+        )
+        if not request_valid:
+            self.current_administrative_workflow_context.operation_in_progress = False
+            self.current_administrative_workflow_context.last_operation_result = "Channel Key generation failed"
+            self.current_administrative_workflow_context.last_operation_error = "Invalid channel key generation request"
+            self.last_admin_action_result = "Channel key Generation failed"
+            return False
+
+        #generate keys + install
+        generated_key_set = channel_key_manager.generate_channel_keys(
+            channel_name,
+            master_secret,
+            server_crypto_service
+        )
+        if generated_key_set is None:
+            self.current_administrative_workflow_context.operation_in_progress = False
+            self.current_administrative_workflow_context.last_operation_result = "Channel Key generation failed"
+            self.current_administrative_workflow_context.last_operation_error = "channel key generation failed"
+            self.last_admin_action_result = "Channel key Generation failed"
+            return False
+
+        #update runtime channel availability
+        server_runtime_context.set_channel_availability(channel_name,True)
+
+        #record success
+        self.current_administrative_workflow_context.operation_in_progress= False
+        self.current_administrative_workflow_context.last_operation_result = "channel key generation successful"
+        self.current_administrative_workflow_context.last_operation_result = ""
+        self.last_admin_action_result = "channel key generation successful"
+        return generated_key_set
+
+
+
+
+
+
     def open_connected_clients_monitor(self):
         pass
     def open_channel_traffic_monitor(self):
