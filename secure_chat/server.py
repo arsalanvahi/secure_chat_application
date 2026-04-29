@@ -431,6 +431,7 @@ class ServerAppCoordinator:
             channel_name,
             master_secret,
             server_crypto_service
+
         )
         if generated_key_set is None:
             self.current_administrative_workflow_context.operation_in_progress = False
@@ -445,7 +446,7 @@ class ServerAppCoordinator:
         #record success
         self.current_administrative_workflow_context.operation_in_progress= False
         self.current_administrative_workflow_context.last_operation_result = "channel key generation successful"
-        self.current_administrative_workflow_context.last_operation_result = ""
+        self.current_administrative_workflow_context.last_operation_error = ""
         self.last_admin_action_result = "channel key generation successful"
         return generated_key_set
 
@@ -823,14 +824,82 @@ class ChannelKeyManager:
         self.per_channel_hmac_keys = {}
         self.channel_available_flags = ChannelAvailabilityState()
         self.key_generation_status = False
-    def validate_channel_key_generation_request(self):
-        pass
-    def generate_channel_keys(self):
-        pass
-    def install_channel_keys(self):
-        pass
-    def retrieve_channel_keys(self):
-        pass
+    def validate_channel_key_generation_request(self,channel_name, master_secret):
+        if channel_name is None:
+            self.key_generation_status = False
+            return False
+        if master_secret not in [ChannelName.IF100, ChannelName.MATH101,ChannelName.SPS101]:
+            self.key_generation_status = False
+            return False
+        if master_secret == "":
+            self.key_generation_status = False
+            return False
+        if self.check_channel_availability(channel_name):
+            self.key_generation_status = False
+            return False
+        return True
+
+    def generate_channel_keys(self,channel_name,master_secret,server_crypto_service):
+        request_valid = self.validate_channel_key_generation_request(channel_name, master_secret)
+        if not request_valid:
+            self.key_generation_status = False
+            return None
+        if server_crypto_service is None:
+            self.key_generation_status = False
+            return None
+        derived_material = server_crypto_service.derive_channel_key_material(master_secret)
+        if derived_material is None:
+            self.key_generation_status = False
+            return None
+
+        key_set = ChannelKeySet(
+            aes_key=derived_material.aes_key,
+            iv= derived_material.iv,
+            hmac_key=derived_material.hmac_key,
+            keys_loaded=True
+        )
+        install_success= self.install_channel_keys(channel_name,key_set)
+        if not install_success:
+            self.key_generation_status=False
+            return None
+        self.mark_channel_available(channel_name)
+        self.key_generation_status=True
+
+
+        return key_set
+
+
+
+
+    def install_channel_keys(self,channel_name, key_set):
+        if channel_name is None:
+            return False
+        if key_set is None:
+            return False
+        self.per_channel_aes_keys[channel_name] = key_set.aes_key
+        self.per_channel_ivs[channel_name] =key_set.iv
+        self.per_channel_hmac_keys[channel_name] = key_set.hmac_key
+        return True
+
+
+
+    def retrieve_channel_keys(self,channel_name):
+        if channel_name is None:
+            return None
+        aes_key = self.per_channel_aes_keys.get(channel_name)
+        iv = self.per_channel_ivs.get(channel_name)
+        hmac_key = self.per_channel_hmac_keys.get(channel_name)
+
+        if aes_key is None or iv is None or hmac_key is None:
+            return None
+        return ChannelKeySet(
+            aes_key=aes_key,
+            iv=iv,
+            hmac_key=hmac_key,
+            keys_loaded=True
+        )
+
+
     def check_channel_availability(self,channel_name):
         if channel_name is None:
             return False
@@ -1516,8 +1585,32 @@ class ServerCryptoService:
         signature = pkcs1_15.new(private_key).sign(h)
         return signature
 
-    def derive_channel_key_material(self):
-        pass
+    def derive_channel_key_material(self,master_key):
+        if master_key is None:
+            return None
+        if master_key == "":
+            return None
+
+        master_key_bytes = master_key.encode("utf-8")
+        reversed_master_key_bytes = master_key[::-1].encode("utf-8")
+
+
+
+        master_key_hash=hashlib.sha3_512(master_key_bytes).digest()
+        aes_key = master_key_hash[0:32]
+        iv = master_key_hash[32:48]
+
+        reversed_master_key_bytes_hash = hashlib.sha3_512(reversed_master_key_bytes).digest()
+        hmac_key = reversed_master_key_bytes_hash[0:32]
+
+
+        return DerivedChannelKeyMaterial(
+            aes_key=aes_key,
+            iv=iv,
+            hmac_key=hmac_key
+            )
+
+
 
 
 # =========================================
@@ -1706,10 +1799,22 @@ class ServerRuntimeContext:
         pass
     def retrieve_runtime_structure(self):
         pass
-    def set_channel_availability(self):
-        pass
-    def get_channel_availability(self):
-        pass
+    def set_channel_availability(self,channel_name,available):
+        if channel_name is None:
+            return False
+        self.channel_availability_snapshot[channel_name] = available
+
+        if self.monitoring_snapshot is not None:
+            self.monitoring_snapshot.available_channels[channel_name] = available
+
+        return True
+
+
+
+    def get_channel_availability(self,channel_name):
+        if channel_name is None:
+            return  False
+        return self.channel_availability_snapshot.get(channel_name,False)
     def clear_runtime_state(self):
         self.lifecycle_state_snapshot = ServerLifecycleState(
             lifecycle_phase="stopped",

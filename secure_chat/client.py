@@ -7,9 +7,8 @@ from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA3_512
 from Crypto.PublicKey import RSA
 import hashlib
-import hmac
+
 from dataclasses import dataclass
-from enum import auto
 
 # =========================================
 #Imports from server.py (shared/common structures only)
@@ -72,8 +71,16 @@ class ClientAppCoordinator:
         self.active_workflow=None
         self.pending_user_action=None
         self.current_view_context=None
+
         self.registration_controller = RegistrationController()
         self.authentication_controller = AuthenticationController()
+
+        self.client_connection_manager = ClientConnectionManager()
+        self.client_session_manager = ClientSessionManager()
+        self.disconnect_controller = DisconnectController()
+        self.client_crypto_service = ClientCryptoService()
+        self.channel_key_store = ChannelKeyStore()
+
     def start_connection_configuration(self):
         pass
     def start_registration_workflow(self):
@@ -93,7 +100,10 @@ class ClientAppCoordinator:
     def open_security_alert_view(self):
         pass
     def request_disconnect(self):
-        pass
+        self.disconnect_controller.start_disconnect(
+            self.client_connection_manager,
+            self.client_session_manager
+        )
     def route_user_action_to_target_workflow(self):
         pass
 
@@ -243,8 +253,15 @@ class AuthenticationController:
             username=self.pending_authentication_input.username
         )
 
-    def handle_authentication_challenge(self,client_crypto_service):
+    def handle_authentication_challenge(self,authentication_challenge_message,client_crypto_service):
         self.last_authentication_error = None
+        if authentication_challenge_message is None:
+            self.last_authentication_error = "No authentication challenge message "
+            return None
+        if authentication_challenge_message.message_type != MessageType.AUTH_CHALLENGE:
+            self.last_authentication_error = "Authentication Challenge Message doesn't fit"
+            return None
+        self.pending_challenge = authentication_challenge_message.challenge
         if not self.authentication_in_progress:
             self.last_authentication_error = "No authentication workflow in progress"
             return None
@@ -452,7 +469,8 @@ class ClientConnectionManager:
                 pass
         self.active_socket_handle = None
         self.connection_state = False
-        self.notify_disconnect()
+
+        #self.notify_disconnect()
 
     def send_registration_request(self,request_message):
         return self.send_application_message(request_message)
@@ -629,9 +647,13 @@ class ConnectionSettingsManager:
         if self.server_ip == "":
             self.configuration_valid = False
             return False
-        if self.server_port < 0:
+        if not isinstance(self.server_port,int):
             self.configuration_valid = False
             return False
+        if self.server_port <= 0 or self.server_port >65535:
+            self.configuration_valid = False
+            return False
+
         self.configuration_valid = True
         return True
 
