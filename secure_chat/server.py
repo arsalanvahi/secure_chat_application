@@ -828,7 +828,7 @@ class ChannelKeyManager:
         if channel_name is None:
             self.key_generation_status = False
             return False
-        if master_secret not in [ChannelName.IF100, ChannelName.MATH101,ChannelName.SPS101]:
+        if channel_name not in [ChannelName.IF100, ChannelName.MATH101,ChannelName.SPS101]:
             self.key_generation_status = False
             return False
         if master_secret == "":
