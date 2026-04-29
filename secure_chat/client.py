@@ -363,7 +363,7 @@ class AuthenticationController:
                 self.last_authentication_error = "channel key format is invalid"
                 self.authentication_in_progress = False
                 return False
-            
+
 
 
             key_set = ChannelKeySet(
