@@ -364,7 +364,7 @@ class ServerAppCoordinator:
         self.pending_admin_operation = "stop_server"
         self.last_admin_action_result = "server shutdown requested"
         return ServerStatus(
-            listening=False,
+            listening=True,
             running=True,
             startup_in_progress=False,
             shutdown_in_progress=True,
@@ -1081,15 +1081,16 @@ class ServerLifecycleManager:
             self.last_lifecycle_error = "server is not running"
             self.last_lifecycle_result = LifecycleResult(
                 success=False,
-                message="server is not running",
+                message="shutdown could not begin",
+                error="server is not running",
                 listening=server_status.listening,
                 running=server_status.running
             )
             return self.last_lifecycle_result
         if server_status.shutdown_in_progress:
-            self.last_lifecycle_error = "shutdown could not begin",
+            self.last_lifecycle_error = "shutdown could not begin"
             self.last_lifecycle_result = LifecycleResult(
-                sucess = False,
+                success = False,
                 message="shutdown could not begin",
                 error="shutdown is already in progress",
                 listening=server_status.listening,
@@ -1107,6 +1108,7 @@ class ServerLifecycleManager:
             listening=server_status.listening,
             running=server_status.running
         )
+        return self.last_lifecycle_result
     def stop_accepting_new_connections(self,server_transport_manager):
         if server_transport_manager is None:
             self.last_lifecycle_error = "Transport manager is missing"
@@ -1152,6 +1154,7 @@ class ServerLifecycleManager:
                 running=True,
             )
             return self.last_lifecycle_result
+
         if server_transport_manager is None:
             self.last_lifecycle_error = "Transport manager is missing"
             self.last_lifecycle_result = LifecycleResult(
@@ -1162,6 +1165,7 @@ class ServerLifecycleManager:
                 running=True
             )
             return self.last_lifecycle_result
+
         connected_clients = server_session_manager.get_connected_clients()
         if not connected_clients:
             self.last_lifecycle_error = ""
@@ -1188,41 +1192,37 @@ class ServerLifecycleManager:
 
             #remove session tracking
             try:
-                server_transport_manager.remove_connections(connection_id)
+                server_session_manager.remove_connections(connection_id)
             except Exception as error:
                 disconnection_errors.append(f"{connection_id} :session removal failed ({error})")
 
-            #clear all sessions
-            try:
-                server_transport_manager.clear_all_sessions()
-            except Exception as error:
-                disconnection_errors.append(f"final session clean up failed {error}")
+        #clear all sessions
+        try:
+                server_session_manager.clear_all_sessions()
+        except Exception as error:
+            disconnection_errors.append(f"final session clean up failed {error}")
 
-            if disconnection_errors:
-                self.last_lifecycle_error = ";".join(disconnection_errors)
-                self.last_lifecycle_result = LifecycleResult(
-                    success=False,
-                    message="Active sessions terminated with partial errors",
-                    error=self.last_lifecycle_error,
-                    running=True
-
-
-                )
-                return self.last_lifecycle_result
-            self.last_lifecycle_error = ""
-            self.last_lifecycle_result= LifecycleResult(
-                success=True,
-                message="All active client sessions closed successfully",
-                error="",
-                listening=False,
+        if disconnection_errors:
+            self.last_lifecycle_error = ";".join(disconnection_errors)
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="Active sessions terminated with partial errors",
+                error=self.last_lifecycle_error,
                 running=True
+
 
             )
             return self.last_lifecycle_result
+        self.last_lifecycle_error = ""
+        self.last_lifecycle_result= LifecycleResult(
+            success=True,
+            message="All active client sessions closed successfully",
+            error="",
+            listening=False,
+            running=True
 
-
-
-
+        )
+        return self.last_lifecycle_result
     def release_runtime_resources(self,server_transport_manager,server_runtime_context,channel_key_manager=None):
         try:
             # Release transport listening socket
@@ -1271,9 +1271,48 @@ class ServerLifecycleManager:
 
 
     def finalize_shutdown(self):
-        pass
+        try:
+            self.lifecycle_phase = "stopped"
+            self.shutdown_in_progress = False
+            self.startup_in_progress = False
+            self.last_lifecycle_error = ""
+
+            self.last_lifecycle_result= LifecycleResult(
+                success=True,
+                message="server shutdown completely successful",
+                error="",
+                listening=False,
+                running=False
+                )
+            return self.last_lifecycle_result
+        except Exception as error:
+            self.lifecycle_phase = "failed"
+            self.last_lifecycle_error = str(error)
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="Failed to finalize shutdown",
+                error=str(error),
+                listening=False,
+                running=False
+                )
+            return self.last_lifecycle_result
+
+
+
     def get_lifecycle_state(self):
-        pass
+        result_text  = ""
+        if self.last_lifecycle_result is not None:
+            result_text = self.last_lifecycle_result.message
+
+        return ServerLifecycleState(
+            lifecycle_phase=self.lifecycle_phase if self.lifecycle_phase is not None else "stopped",
+            startup_in_progress=self.startup_in_progress,
+            shutdown_in_progress=self.shutdown_in_progress,
+            running=(self.lifecycle_phase=="running"),
+            listening=(self.lifecycle_phase=="running"),
+            last_lifecycle_result=result_text,
+            last_lifecycle_error=self.last_lifecycle_error if self.last_lifecycle_error else ""
+            )
 
 
 # =========================================
@@ -1594,7 +1633,25 @@ class ServerRuntimeContext:
     def get_channel_availability(self):
         pass
     def clear_runtime_state(self):
-        pass
+        self.lifecycle_state_snapshot = ServerLifecycleState(
+            lifecycle_phase="stopped",
+            startup_in_progress=False,
+            shutdown_in_progress=False,
+            running=False,
+            listening=False,
+            last_lifecycle_result="",
+            last_lifecycle_error=""
+        )
+        self.active_runtime_structure_registry = RuntimeStructureRegistry()
+
+        self.channel_availability_snapshot = {
+            ChannelName.IF100:False,
+            ChannelName.MATH101:False,
+            ChannelName.SPS101:False
+        }
+        self.monitoring_snapshot = MonitoringSnapshot()
+        self.retry_recovery_flags = RetryRecoveryState()
+        return True
     def snapshot_monitoring_state(self):
         pass
 

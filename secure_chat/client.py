@@ -360,20 +360,74 @@ class DisconnectController:
         self.pending_cleanup_status = False
         self.last_disconnect_result = None
         self.last_disconnect_error = None
-    def start_disconnect(self):
-        pass
+    def start_disconnect(self,client_connection_manager, client_session_manager):
+        self.disconnect_in_progress = True
+        self.pending_cleanup_status = False
+        self.last_disconnect_error = None
+        self.last_disconnect_result = None
+
+        if client_connection_manager is None:
+            self.last_disconnect_error = "Client connection manager is missing"
+            self.disconnect_in_progress = False
+            return False
+        if client_session_manager is None:
+            self.last_disconnect_error = "Client session manager is missing"
+            self.disconnect_in_progress = False
+            return False
+        try:
+            self.stop_further_activity()
+
+            self.abort_in_progress_operations()
+
+            self.close_active_connections(client_connection_manager)
+
+            self.clear_local_session_state(client_session_manager)
+
+            self.finalize_disconnect()
+
+            self.pending_cleanup_status = True
+            self.last_disconnect_result = "Disconnect completed successfully"
+            return True
+
+
+
+        except Exception as error:
+            self.last_disconnect_error = str(error)
+            self.handle_disconnect_error()
+            return False
+
+
+
     def stop_further_activity(self):
-        pass
+        if not self.disconnect_in_progress:
+            self.last_disconnect_error = "No disconnect operation in progress"
+            return False
+        self.pending_cleanup_status = False
+        self.last_disconnect_error = None
+        return True
     def abort_in_progress_operations(self):
-        pass
-    def close_active_connections(self):
-        pass
-    def clear_local_session_state(self):
-        pass
+        if not self.disconnect_in_progress:
+            self.last_disconnect_error = "No disconnect operation in progress"
+            return False
+        self.pending_cleanup_status = False
+        self.last_disconnect_error = None
+        self.last_disconnect_result = "In-progress operations aborted"
+        return True
+    def close_active_connections(self,client_connection_manager):
+        client_connection_manager.disconnect_from_server()
+        return True
+
+    def clear_local_session_state(self,client_session_manager):
+        client_session_manager.reset_session_state()
+        return True
     def finalize_disconnect(self):
-        pass
+        self.disconnect_in_progress = False
+        self.pending_cleanup_status = True
+        return True
     def handle_disconnect_error(self):
-        pass
+        self.disconnect_in_progress = False
+        self.pending_cleanup_status = False
+        return False
 
 # =========================================
 # 3. Transport/Protocol Layer
@@ -391,8 +445,14 @@ class ClientConnectionManager:
         self.connection_state = True
 
     def disconnect_from_server(self,disconnect_message=None):
+        if self.active_socket_handle is not None:
+            try:
+                self.active_socket_handle.close()
+            except Exception:
+                pass
         self.active_socket_handle = None
         self.connection_state = False
+        self.notify_disconnect()
 
     def send_registration_request(self,request_message):
         return self.send_application_message(request_message)
@@ -434,8 +494,8 @@ class ClientConnectionManager:
     def detect_connection_loss(self):
         return not self.connection_state
     def notify_disconnect(self):
-        for handler in self.registered_disconnect_handler:
-            handler()
+        for handle in self.registered_disconnect_handler:
+            handle()
 
 
 # =========================================
@@ -518,7 +578,7 @@ class ClientCryptoService:
             h = SHA3_512.new(authentication_result_message.encrypted_result)
             pkcs1_15.new(public_key).verify(h,authentication_result_message.signature)
             return True
-        except(valueError,TypeError):
+        except(ValueError,TypeError):
             return False
 
     def decrypt_protected_response(self,authentication_result_message,derived_material):
