@@ -348,7 +348,32 @@ class ServerAppCoordinator:
             error=""
         )
     def stop_server(self):
-        pass
+
+
+        self.current_administrative_workflow_context = AdminOperationalContext(
+            requested_operation="stop server",
+            requested_port=None,
+            startup_allowed=False,
+            shutdown_allowed=True,
+            operation_in_progress=True,
+            last_operation_result="shutdown requested",
+            last_operation_error=""
+
+
+        )
+        self.pending_admin_operation = "stop_server"
+        self.last_admin_action_result = "server shutdown requested"
+        return ServerStatus(
+            listening=False,
+            running=True,
+            startup_in_progress=False,
+            shutdown_in_progress=True,
+            ready_to_accept_connections=False,
+            port=None,
+            message="server shutdown",
+            error=""
+
+        )
     def trigger_channel_key_generation(self):
         pass
     def open_connected_clients_monitor(self):
@@ -1041,12 +1066,163 @@ class ServerLifecycleManager:
             )
             return self.last_lifecycle_result
 
-    def begin_shutdown(self):
-        pass
-    def stop_accepting_new_connections(self):
-        pass
-    def terminate_active_sessions(self):
-        pass
+    def begin_shutdown(self,server_status):
+        if server_status is None:
+            self.last_lifecycle_error = "server status not found"
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="Shutdown could not begin",
+                error= "server status not found",
+                listening=False,
+                running=False
+            )
+            return self.last_lifecycle_result
+        if not server_status.running:
+            self.last_lifecycle_error = "server is not running"
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="server is not running",
+                listening=server_status.listening,
+                running=server_status.running
+            )
+            return self.last_lifecycle_result
+        if server_status.shutdown_in_progress:
+            self.last_lifecycle_error = "shutdown could not begin",
+            self.last_lifecycle_result = LifecycleResult(
+                sucess = False,
+                message="shutdown could not begin",
+                error="shutdown is already in progress",
+                listening=server_status.listening,
+                running=server_status.running
+            )
+            return self.last_lifecycle_result
+        self.lifecycle_phase = "shutdown started"
+        self.shutdown_in_progress = True
+        self.startup_in_progress = False
+        self.last_lifecycle_error = ""
+        self.last_lifecycle_result = LifecycleResult(
+            success=True,
+            message="shutdown started successfully",
+            error="",
+            listening=server_status.listening,
+            running=server_status.running
+        )
+    def stop_accepting_new_connections(self,server_transport_manager):
+        if server_transport_manager is None:
+            self.last_lifecycle_error = "Transport manager is missing"
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="could not stop accepting new connections",
+                error = "transport manager is missing",
+                running= True
+            )
+            return self.last_lifecycle_result
+        transport_result = server_transport_manager.stop_accepting_client_connections()
+        if not transport_result:
+            self.last_lifecycle_error = "transport layer failed to stop accepting new connections"
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="could not stop accepting new connections",
+                error="Transport layer failed to stop accepting new connections",
+                listening=True,
+                running=True
+
+            )
+            return self.last_lifecycle_result
+        self.lifecycle_phase = "stopping_accept_loop"
+        self.last_lifecycle_error= ""
+
+        self.last_lifecycle_result= LifecycleResult(
+            success=True,
+            message="stopped accepting new client connections",
+            error="",
+            listening=False,
+            running=True
+        )
+        return self.last_lifecycle_result
+
+    def terminate_active_sessions(self,server_session_manager,server_transport_manager):
+        if server_session_manager is None:
+            self.last_lifecycle_error = "Session Manager is missing"
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="could not terminate active sessions",
+                error="session manager is missing",
+                listening=False,
+                running=True,
+            )
+            return self.last_lifecycle_result
+        if server_transport_manager is None:
+            self.last_lifecycle_error = "Transport manager is missing"
+            self.last_lifecycle_result = LifecycleResult(
+                success=False,
+                message="Could not terminate active sessions",
+                error="Transport manager is missing",
+                listening=False,
+                running=True
+            )
+            return self.last_lifecycle_result
+        connected_clients = server_session_manager.get_connected_clients()
+        if not connected_clients:
+            self.last_lifecycle_error = ""
+            self.last_lifecycle_result = LifecycleResult(
+                success=True,
+                message="No active sessions to terminate",
+                error= "",
+                listening=False,
+                running=True
+
+
+            )
+            return self.last_lifecycle_result
+        disconnection_errors = []
+
+        for client_info in connected_clients:
+            connection_id = client_info.connection_id
+
+            #close transport session
+            try:
+                server_transport_manager.close_session(connection_id)
+            except Exception as error:
+                disconnection_errors.append(f"{connection_id}:transport close failed ({error})")
+
+            #remove session tracking
+            try:
+                server_transport_manager.remove_connections(connection_id)
+            except Exception as error:
+                disconnection_errors.append(f"{connection_id} :session removal failed ({error})")
+
+            #clear all sessions
+            try:
+                server_transport_manager.clear_all_sessions()
+            except Exception as error:
+                disconnection_errors.append(f"final session clean up failed {error}")
+
+            if disconnection_errors:
+                self.last_lifecycle_error = ";".join(disconnection_errors)
+                self.last_lifecycle_result = LifecycleResult(
+                    success=False,
+                    message="Active sessions terminated with partial errors",
+                    error=self.last_lifecycle_error,
+                    running=True
+
+
+                )
+                return self.last_lifecycle_result
+            self.last_lifecycle_error = ""
+            self.last_lifecycle_result= LifecycleResult(
+                success=True,
+                message="All active client sessions closed successfully",
+                error="",
+                listening=False,
+                running=True
+
+            )
+            return self.last_lifecycle_result
+
+
+
+
     def release_runtime_resources(self,server_transport_manager,server_runtime_context,channel_key_manager=None):
         try:
             # Release transport listening socket
@@ -1269,7 +1445,6 @@ class ServerSessionManager:
 
     def remove_connections(self,connection_id):
         #removes a connection and all related runtime state.
-        #called when a client disconnects or on clean up.
         if connection_id is None:
             return False
         session_info = self.active_connections.pop(connection_id,None)
