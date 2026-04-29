@@ -81,6 +81,10 @@ class ClientAppCoordinator:
         self.client_crypto_service = ClientCryptoService()
         self.channel_key_store = ChannelKeyStore()
 
+        self.authentication_controller.channel_key_store = self.channel_key_store
+        self.authentication_controller.client_session_manager = self.client_session_manager
+
+
     def start_connection_configuration(self):
         pass
     def start_registration_workflow(self):
@@ -292,28 +296,93 @@ class AuthenticationController:
             self.last_authentication_error = "Authentication result message is missing"
             self.authentication_in_progress = False
             return False
-        #verify server signature
+
+        if self.pending_authentication_input is None:
+            self.last_authentication_error = "Authentication input is missing"
+            self.authentication_in_progress = False
+            return False
+
+        # Verify server signature
         if not client_crypto_service.verify_digital_signature(
-            authentication_result_message,
-            client_crypto_service.server_signature_verification_public_keys
+                authentication_result_message,
+                client_crypto_service.server_signature_verification_public_keys
         ):
             self.last_authentication_error = "Invalid server signature"
+            self.authentication_in_progress = False
             return False
-        #derive AES key + IV from reversed password hash
-        derived_material = client_crypto_service.derive_response_decryption_material_from_password(self.pending_authentication_input.password)
 
-
-        #Decrypt response
-        plaintext = client_crypto_service.decrypt_protected_response(authentication_result_message=authentication_result_message,
-                                                                     derived_material=derived_material)
-        #pars plaintext
-        pars = plaintext.split("|")
-        self.last_authentication_result = AuthenticationResult(
-            status=AuthStatus(pars[0]),
-            message=pars[1],
-            channel_available=(pars[2]=="True"),
-            channel_keys_loaded=(pars[3]=="True")
+        # Derive response decryption material from password
+        derived_material = client_crypto_service.derive_response_decryption_material_from_password(
+            self.pending_authentication_input.password
         )
+        if derived_material is None:
+            self.last_authentication_error = "Response decryption material derivation failed"
+            self.authentication_in_progress = False
+            return False
+
+        # Decrypt protected response
+        plaintext = client_crypto_service.decrypt_protected_response(
+            authentication_result_message=authentication_result_message,
+            derived_material=derived_material
+        )
+        if plaintext is None:
+            self.last_authentication_error = "Authentication result decryption failed"
+            self.authentication_in_progress = False
+            return False
+
+        # Parse plaintext
+        parts = plaintext.split("|")
+        if len(parts) < 4:
+            self.last_authentication_error = "Authentication result format is invalid"
+            self.authentication_in_progress = False
+            return False
+
+        status = AuthStatus(parts[0])
+        message = parts[1]
+        channel_available = (parts[2] == "True")
+        channel_keys_loaded = (parts[3] == "True")
+
+        self.last_authentication_result = AuthenticationResult(
+            status=status,
+            message=message,
+            channel_available=channel_available,
+            channel_keys_loaded=channel_keys_loaded
+        )
+
+        # If channel keys are included, parse and store them
+        if channel_keys_loaded:
+            if len(parts) < 7:
+                self.last_authentication_error = "Channel key material is missing from authentication result"
+                self.authentication_in_progress = False
+                return False
+            try:
+                aes_key = bytes.fromhex(parts[4])
+                iv = bytes.fromhex(parts[5])
+                hmac_key = bytes.fromhex(parts[6])
+            except ValueError:
+                self.last_authentication_error = "channel key format is invalid"
+                self.authentication_in_progress = False
+                return False
+            
+
+
+            key_set = ChannelKeySet(
+                aes_key=aes_key,
+                iv=iv,
+                hmac_key=hmac_key,
+                keys_loaded=True
+            )
+
+            if hasattr(self, "channel_key_store") and self.channel_key_store is not None:
+                self.channel_key_store.store_channel_keys(key_set)
+
+        # Optional client session-state update
+        if hasattr(self, "client_session_manager") and self.client_session_manager is not None:
+            self.client_session_manager.set_authentication_state(status == AuthStatus.SUCCESS)
+            self.client_session_manager.set_channel_readiness(channel_available and channel_keys_loaded)
+
+        self.authentication_in_progress = False
+        self.last_authentication_error = None
         return True
 
 

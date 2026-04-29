@@ -658,23 +658,31 @@ class AuthenticationService:
 
 
 
-    def build_authentication_result(self,authentication_success,channel_key_set = None):
-        if authentication_success:
-            authentication_result = AuthenticationResult(
-                status=AuthStatus.SUCCESS,
-                message="Authentication Successful",
-                channel_available=True,
-                channel_keys_loaded=(channel_key_set is not None)
-
-            )
-        else:
-            authentication_result = AuthenticationResult(
+    def build_authentication_result(self,authentication_success, channel_key_set = None):
+        if not authentication_success:
+            return AuthenticationResult(
                 status=AuthStatus.FAILURE,
                 message="Authentication failure",
                 channel_available=False,
                 channel_keys_loaded=False
+
             )
-        return authentication_result
+        if channel_key_set is None:
+            return AuthenticationResult(
+                status=AuthStatus.CHANNEL_UNAVAILABLE,
+                message="Subscribed channel is unavailable",
+                channel_available=False,
+                channel_keys_loaded=False
+                )
+        return AuthenticationResult(
+                status=AuthStatus.SUCCESS,
+                message="Authentication Successful",
+                channel_available=True,
+                channel_keys_loaded=True
+
+            )
+
+
 
 
     def protect_authentication_result(self, server_crypto_service, enrollment_repository, channel_key_set=None):
@@ -1873,12 +1881,49 @@ def setup_server():
         )
 ###################################################################
     def handle_authentication_request_packet(connection_id, packet):
-        return authentication_service.handle_authentication_request(
+        authentication_service.current_connection_id = connection_id
+
+
+        authentication_success = authentication_service.verify_authentication_response(
             packet,
             server_crypto_service,
-            enrollment_repository,
-            server_session_manager
+            enrollment_repository
         )
+        channel_key_set = None
+
+        if authentication_success:
+            username = authentication_service.current_authentication_request_context.username
+            enrollment_record = enrollment_repository.retrieve_enrollment_record_by_username(uername)
+
+            if enrollment_record is not None:
+                subscribed_channel = enrollment_record.subscribed_channel
+
+            if channel_key_manager.check_channel_availability(subscribed_channel):
+                channel_key_set = channel_key_manager.retrieve_channel_keys(subscribed_channel)
+            #build authentication result
+            auth_result = authentication_service.build_authentication_result(
+                authentication_success,
+                channel_key_set
+            )
+            authentication_service.current_authentication_result = auth_result
+
+            #protect result
+            protected_message  = authentication_service.protect_authentication_result(
+                server_crypto_service,
+                enrollment_repository,
+                channel_key_set
+            )
+            if protected_message is None:
+                return None
+            #active session
+            if auth_result.status == AuthStatus.SUCCESS:
+                authentication_service.activate_authenticated_session(
+                    server_session_manager,
+                    enrollment_repository
+                )
+
+
+        return protected_message
 #############################################################
 
     def handle_authentication_response_packet(connection_id, packet):
