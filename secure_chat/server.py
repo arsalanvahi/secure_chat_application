@@ -254,7 +254,7 @@ class ChannelAvailabilityState:
 class RelayContext:
     sender_connection_id: str
     sender_session_info:ServerSessionInfo | None
-    sender_packet:SecureMessagePacket | None = None
+    secure_packet:SecureMessagePacket | None = None
     sender_authenticated: bool = False
     sender_channel:ChannelName | None= None
     routing_allowed: bool = False
@@ -685,22 +685,30 @@ class AuthenticationService:
 
 
     def build_authentication_result(self,authentication_success,channel_key_set = None):
-        if authentication_success:
-            authentication_result = AuthenticationResult(
-                status=AuthStatus.SUCCESS,
-                message="Authentication Successful",
-                channel_available=True,
-                channel_keys_loaded=(channel_key_set is not None)
-
-            )
-        else:
-            authentication_result = AuthenticationResult(
+        if not authentication_success:
+            return AuthenticationResult(
                 status=AuthStatus.FAILURE,
                 message="Authentication failure",
                 channel_available=False,
                 channel_keys_loaded=False
+
             )
-        return authentication_result
+        if channel_key_set is None:
+            return AuthenticationResult(
+                status=AuthStatus.CHANNEL_UNAVAILABLE,
+                message="subscribed channel is unavailable",
+                channel_available=False,
+                channel_keys_loaded=False
+            )
+        return AuthenticationResult(
+            status=AuthStatus.SUCCESS,
+            message="Authentication successful",
+            channel_available=True,
+            channel_keys_loaded=True
+        )
+
+
+
 
 
     def protect_authentication_result(self, server_crypto_service, enrollment_repository, channel_key_set=None):
@@ -832,7 +840,7 @@ class MessageRelayService:
         self.current_relay_context = None
         self.last_relay_result  = None
         self.last_routing_error = None
-        
+
     def validate_sender_for_routing(self,sender_connection_id, sender_session_info):
         if sender_connection_id is None:
             self.last_routing_error = "sender connection_id is missing"
@@ -1021,7 +1029,7 @@ class MessageRelayService:
                 recipient_count=0
             )
             return self.last_relay_result
-        if self.current_relay_context.routing_allowed is None:
+        if not self.current_relay_context.routing_allowed:
             self.last_routing_error = "Routing is not allowed for the sender"
             self.last_relay_result = RelayResult(
                 success=False,
@@ -1072,12 +1080,12 @@ class MessageRelayService:
         self.last_relay_result = RelayResult(
             success=True,
             message="Secure packet relayed successfully",
-            error="broadcast relay failed",
+            error="",
             sender_authenticated=self.current_relay_context.sender_authenticated,
             sender_channel=self.current_relay_context.sender_channel,
-            recipient_count=0
+            recipient_count=len(recipient_ids)
         )
-        return self.current_relay_context
+        return self.last_relay_result
 
 
 
@@ -1090,7 +1098,7 @@ class MessageRelayService:
         if recipient_ids is None:
             self.last_routing_error = "Recipient list is missing"
             return False
-        if not isinstance(recipient_ids,list):
+        if not isinstance(recipient_ids,(list,set,tuple)):
             self.last_routing_error = "Recipient list format is invalid"
             return False
         if secure_packet is None:
@@ -1110,11 +1118,16 @@ class MessageRelayService:
             self.last_routing_error = "broadcast operation failed"
             return False
         failed_recipients = []
-        for recipient_ids,sender_result in broadcast_results.items():
+        for recipient_id,sender_result in broadcast_results.items():
             if not sender_result:
-                failed_recipients.append(recipient_ids)
+                failed_recipients.append(recipient_id)
+        if self.current_relay_context is not None:
+            self.current_relay_context.failed_recipient_ids = failed_recipients
+
+
 
         if failed_recipients:
+
             self.last_routing_error = ("broadcast failed for recipients "+ " , ".join(failed_recipients))
             return False
         self.last_routing_error = None
@@ -1134,7 +1147,7 @@ class MessageRelayService:
                 recipient_count=0
             )
             return self.last_relay_result
-        failed_recipient_ids = getattr(self.current_relay_context,"failed_recipient_ids")
+        failed_recipient_ids = getattr(self.current_relay_context,"failed_recipient_ids",[])
 
         if failed_recipient_ids is None:
             failed_recipient_ids = []
@@ -1154,7 +1167,7 @@ class MessageRelayService:
             successful_count = 0
         self.last_routing_error = ("Recipient disconnecs occured duing relay"+" , ".join(failed_recipient_ids))
         self.last_relay_result = RelayResult(
-            success=True,
+            success=False,
             message="Relay completed with recipient disconnects",
             error=self.last_routing_error,
             sender_authenticated=self.current_relay_context.sender_authenticated,
@@ -1183,6 +1196,9 @@ class ChannelKeyManager:
             self.key_generation_status = False
             return False
         if channel_name not in [ChannelName.IF100, ChannelName.MATH101,ChannelName.SPS101]:
+            self.key_generation_status = False
+            return False
+        if master_secret is None:
             self.key_generation_status = False
             return False
         if master_secret == "":
@@ -1896,7 +1912,7 @@ class ServerCryptoService:
 
     def derive_response_protection_material(self,stored_reversed_password_hash):
         if stored_reversed_password_hash is None:
-            return False
+            return None
         response_encryption_key = stored_reversed_password_hash[32:64]
         response_encryption_iv = stored_reversed_password_hash[16:32]
         derived_response_protection_material = DerivedResponseProtectionMaterial(
@@ -2218,6 +2234,7 @@ def setup_server():
     authentication_service = AuthenticationService()
     channel_key_manager = ChannelKeyManager()
     server_session_manager = ServerSessionManager()
+    message_relay_service = MessageRelayService()
 #########################################################
     def handle_registration_packet(connection_id, packet):
         return registration_service.handle_registration_request(
@@ -2234,52 +2251,83 @@ def setup_server():
             server_session_manager
         )
 #############################################################
-
     def handle_authentication_response_packet(connection_id, packet):
-        # ✅ ALWAYS capture transport context
         authentication_service.current_connection_id = connection_id
 
-        # 1. Verify authentication response
         authentication_success = authentication_service.verify_authentication_response(
             packet,
             server_crypto_service,
             enrollment_repository
         )
 
-        # 2. Build AuthenticationResult object
+        channel_key_set = None
+
+        if authentication_success:
+            username = authentication_service.current_authentication_request_context.username
+            enrollment_record = enrollment_repository.retrieve_enrollment_record_by_username(username)
+
+            if enrollment_record is not None:
+                subscribed_channel = enrollment_record.subscribed_channel
+
+                if channel_key_manager.check_channel_availability(subscribed_channel):
+                    channel_key_set = channel_key_manager.retrieve_channel_keys(subscribed_channel)
+
         auth_result = authentication_service.build_authentication_result(
-            authentication_success
+            authentication_success,
+            channel_key_set
         )
 
         authentication_service.current_authentication_result = auth_result
 
-        # 3. Protect (encrypt + sign)
         protected_message = authentication_service.protect_authentication_result(
             server_crypto_service,
-            enrollment_repository
+            enrollment_repository,
+            channel_key_set
         )
-
-        print("[SERVER DEBUG] Returning AUTH_RES object:", protected_message)
 
         if protected_message is None:
             return None
 
-        # 4. Activate session if successful
-        if authentication_success:
+        if auth_result.status == AuthStatus.SUCCESS:
             authentication_service.activate_authenticated_session(
                 server_session_manager,
                 enrollment_repository
             )
 
-        # 5. Return AUTH_RES
         return protected_message
 
+##################################################################
+    def handle_secure_message_packet(connection_id, packet):
+        sender_session_info = server_session_manager.get_session_by_identifier(connection_id)
 
+        validation_result = message_relay_service.validate_sender_for_routing(
+            connection_id,
+            sender_session_info
+        )
+        if not validation_result.success:
+            return None
+
+        message_relay_service.current_relay_context.secure_packet = packet
+
+        recipient_result = message_relay_service.resolve_channel_recipients(
+            server_session_manager
+        )
+        if not recipient_result.success:
+            return None
+
+        relay_result = message_relay_service.relay_secure_packet(
+            server_transport_manager
+        )
+
+        return relay_result
+
+####################################################################
 
     server_transport_manager.register_transport_handlers({
         MessageType.REG_REQ: handle_registration_packet,
         MessageType.AUTH_REQ:handle_authentication_request_packet,
-        MessageType.AUTH_RESP:handle_authentication_response_packet  # ✅ ADD THIS
+        MessageType.AUTH_RESP:handle_authentication_response_packet,
+        MessageType.MSG_SEND:handle_secure_message_packet
 
 
     })

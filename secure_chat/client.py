@@ -1,8 +1,8 @@
 #client.py should be organized in this order
 
 import hmac
-from email import message
-from multiprocessing import connection
+
+
 
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad, pad
@@ -63,7 +63,7 @@ class AuthenticationInput:
 @dataclass
 class IncomingMessage:
     packet:SecureMessagePacket | None
-    cihertext:bytes | None
+    ciphertext:bytes | None
     hmac_value: bytes | None
     packet_valid: bool = False
 
@@ -109,6 +109,21 @@ class ClientAppCoordinator:
         self.disconnect_controller = DisconnectController()
         self.client_crypto_service = ClientCryptoService()
         self.channel_key_store = ChannelKeyStore()
+        self.secure_message_sender = SecureMessageSender()
+        self.secure_message_sender.channel_key_store = self.channel_key_store
+
+        self.incoming_message_processor = IncomingMessageProcessor()
+        self.incoming_message_processor.channel_key_store = self.channel_key_store
+        self.incoming_message_processor.client_session_manager = self.client_session_manager
+        self.incoming_message_processor.client_crypto_service = self.client_crypto_service
+
+
+        self.authentication_controller.channel_key_store = self.channel_key_store
+        self.authentication_controller.client_session_manager = self.client_session_manager
+
+
+
+
 
 
 
@@ -131,7 +146,7 @@ class ClientAppCoordinator:
     def open_security_alert_view(self):
         pass
     def request_disconnect(self):
-        self.disconnect_controller.start_disconnect(
+        return self.disconnect_controller.start_disconnect(
             self.client_connection_manager,
             self.client_session_manager
         )
@@ -361,18 +376,19 @@ class SecureMessageSender:
         self.send_in_progress = False
         self.last_send_result = None
         self.last_send_error = None
+        self.channel_key_store = None
     def validate_send_readiness(self,session_manager):
         if session_manager is None:
-            self.last_send_result = "sending failure"
             self.last_send_error = "session manager is not available"
+            self.last_send_result = "sending failure"
             return False
         if not session_manager.get_connection_state():
-            self.last_send_error = "sending failure"
-            self.last_send_result = "client is not connected"
+            self.last_send_result = "sending failure"
+            self.last_send_error = "client is not connected"
             return False
         if not session_manager.get_authentication_state():
             self.last_send_result = "sending failure"
-            self.last_send_result ="client is not authenticated"
+            self.last_send_error ="client is not authenticated"
             return False
         if not session_manager.channel_ready:
             self.last_send_result = "sending failure"
@@ -405,9 +421,9 @@ class SecureMessageSender:
 
     def prepare_outgoing_plaintext(self):
         if not self.validate_message_content():
-            self.last_send_result = "message content is not ready"
-            self.last_send_error = "sending failure"
-            return False
+            self.last_send_result = "sending failure"
+            self.last_send_error = "message content is not ready"
+            return None
         if not isinstance(self.current_outgoing_plaintext,str):
             self.last_send_result = "sending failure"
             self.last_send_error = "Message content format is not ready"
@@ -464,6 +480,7 @@ class SecureMessageSender:
             ciphertext=encrypted_message,
             hmac=hmac_value
         )
+        self.current_protected_packet = secure_packet
 
 
         return secure_packet
@@ -473,19 +490,19 @@ class SecureMessageSender:
         if client_connection_manager is None:
             self.last_send_result = "sending failure"
             self.last_send_error = "client connection manager is unavailable"
-            return None
-        if self.current_outgoing_plaintext is None:
+            return False
+        if self.current_protected_packet is None:
             self.last_send_result = "sending failure"
             self.last_send_error = "secure packet is not ready"
-            return None
-        send_result = client_connection_manager.send_application_message(self.current_outgoing_plaintext)
+            return False
+        send_result = client_connection_manager.send_application_message(self.current_protected_packet)
         if not send_result:
             self.last_send_result = "sending failure"
             self.last_send_error = "secure packet could not be send"
-            return None
+            return False
 
         self.last_send_result = "secure message sent successfully"
-        self.last_send_error = ""
+        self.last_send_error = None
         return True
 
     def record_send_event(self):
@@ -505,6 +522,12 @@ class IncomingMessageProcessor:
         self.channel_key_store = None
         self.client_session_manager = None
         self.client_crypto_service  = None
+
+
+
+
+
+
     def handle_incoming_packet(self,current_incoming_packet):
         self.receive_in_progress =  True
         self.last_receive_error = None
@@ -528,7 +551,7 @@ class IncomingMessageProcessor:
             return False
         verification_result = self.verify_incoming_packet(current_incoming_packet)
         self.current_verification_result = verification_result
-        if verification_result is None or not VerificationResult.success:
+        if verification_result is None or not verification_result.success:
             self.reject_incoming_packet()
             self.record_receive_failure()
             self.receive_in_progress = False
@@ -537,13 +560,13 @@ class IncomingMessageProcessor:
         decryption_result = self.decrypt_verified_packet(current_incoming_packet)
         self.current_decryption_result = decryption_result
 
-        if decryption_result is None or not decryption_result:
+        if decryption_result is None or not decryption_result.success:
             self.reject_incoming_packet()
             self.record_receive_failure()
             self.receive_in_progress = False
             return False
 
-        self.current_decryption_result = decryption_result.plaintext
+        self.current_recovered_plaintext = decryption_result.plaintext
         self.deliver_plaintext_message()
         self.receive_in_progress = False
         return True
@@ -568,7 +591,7 @@ class IncomingMessageProcessor:
             return None
         incoming_message = IncomingMessage(
             packet=current_incoming_packet,
-            cihertext=current_incoming_packet.ciphertext,
+            ciphertext=current_incoming_packet.ciphertext,
             hmac_value=current_incoming_packet.hmac,
             packet_valid=True
             )
@@ -580,11 +603,11 @@ class IncomingMessageProcessor:
             self.last_receive_error = "client session manager is not available"
             return False
 
-        if not hasattr(self,"client_key_store") or self.client_key_store is None:
+        if not hasattr(self,"channel_key_store") or self.channel_key_store is None:
             self.last_receive_error = "channel key store is not available"
             return False
 
-        if self.client_session_manager.check_receive_readiness():
+        if not self.client_session_manager.check_receive_readiness():
             self.last_receive_error = "client is not ready to receive secure message"
             return False
         if not self.channel_key_store.check_key_availability():
@@ -618,12 +641,12 @@ class IncomingMessageProcessor:
                 ciphertext_valid=False
             )
         expected_hmac= hmac.new(
-            key_set.aes_key,
+            key_set.hmac_key,
             current_incoming_packet.ciphertext,
             hashlib.sha3_512
         ).digest()
 
-        if not hmac.compare_digest(current_incoming_packet,expected_hmac):
+        if not hmac.compare_digest(current_incoming_packet.hmac,expected_hmac):
             self.last_receive_error = "incoming packet HMAC is invalid"
             return VerificationResult(
                 success=False,
@@ -792,6 +815,7 @@ class ClientConnectionManager:
         self.registered_packet_handler = {}
         self.registered_disconnect_handler = []
         self.remote_endpoint_info = None
+        self.current_incoming_message = None
     def connect_to_server(self,socket_handle):
         self.active_socket_handle = socket_handle
         self.connection_state = True
