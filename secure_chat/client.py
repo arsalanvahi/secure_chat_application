@@ -1,10 +1,11 @@
 #client.py should be organized in this order
 
 import hmac
+from email import message
 from multiprocessing import connection
 
 from Crypto.Cipher import AES
-from Crypto.Util.Padding import unpad
+from Crypto.Util.Padding import unpad, pad
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA3_512
 from Crypto.PublicKey import RSA
@@ -82,6 +83,8 @@ class ClientAppCoordinator:
         self.disconnect_controller = DisconnectController()
         self.client_crypto_service = ClientCryptoService()
         self.channel_key_store = ChannelKeyStore()
+
+
 
     def start_connection_configuration(self):
         pass
@@ -358,13 +361,107 @@ class SecureMessageSender:
         return True
 
     def validate_message_content(self):
-        pass
+        if self.current_outgoing_plaintext is None:
+            self.last_send_result = "sending failure"
+            self.last_send_error = "message content is missing"
+            return False
+        if self.current_outgoing_plaintext == "":
+            self.last_send_result = "sending failure"
+            self.last_send_error = "message content is empty"
+            return False
+        if isinstance(self.current_outgoing_plaintext,str) and self.current_outgoing_plaintext.strip() == "":
+            self.last_send_result = "sending failure"
+            self.last_send_error = "message content is empty"
+            return False
+        self.last_send_result = None
+        self.last_send_error = None
+        return True
+
     def prepare_outgoing_plaintext(self):
-        pass
-    def secure_packet(self):
-        pass
-    def send_secure_message(self):
-        pass
+        if not self.validate_message_content():
+            self.last_send_result = "message content is not ready"
+            self.last_send_error = "sending failure"
+            return False
+        if not isinstance(self.current_outgoing_plaintext,str):
+            self.last_send_result = "sending failure"
+            self.last_send_error = "Message content format is not ready"
+            return False
+        prepared_plaintext = self.current_outgoing_plaintext.strip()
+        self.current_outgoing_plaintext = prepared_plaintext
+
+        self.last_send_result = None
+        self.last_send_error = None
+        return prepared_plaintext
+
+
+
+
+
+    def secure_packet(self,prepared_plaintext, client_crypto_service):
+        if not prepared_plaintext:
+            self.last_send_result = "sending failure"
+            self.last_send_error  = "prepared message is not ready"
+            return None
+        if prepared_plaintext == "":
+            self.last_send_result = "sending failure"
+            self.last_send_error = "prepared message is empty"
+            return None
+        if not client_crypto_service:
+            self.last_send_result = "sending failure"
+            self.last_send_error = "message cannot encrypted"
+            return None
+        if not hasattr(self,"channel_key_store") or self.channel_key_store is None:
+            self.last_send_result = "sending failure"
+            self.last_send_error = "channel key store is not available"
+            return None
+        key_set = self.channel_key_store.retrieve_channel_keys()
+        if key_set is None:
+            self.last_send_result = "sending failure"
+            self.last_send_error = "channel keys are unavailable"
+            return None
+
+
+        encrypted_message = client_crypto_service.encrypt_secure_message(prepared_plaintext,key_set.aes_key,key_set.iv)
+        if encrypted_message is None:
+            self.last_send_result = "sending failure"
+            self.last_send_error = "message encryption failed"
+            return None
+
+        hmac_value = client_crypto_service.compute_integrity_value(encrypted_message,key_set.hmac_key)
+        if hmac_value is None:
+            self.last_send_result = "sending failure"
+            self.last_send_error = "HMAC generation failed"
+            return None
+
+        secure_packet = SecureMessagePacket(
+            message_type=MessageType.MSG_SEND,
+            ciphertext=encrypted_message,
+            hmac=hmac_value
+        )
+
+
+        return secure_packet
+
+
+    def send_secure_message(self,client_connection_manager):
+        if client_connection_manager is None:
+            self.last_send_result = "sending failure"
+            self.last_send_error = "client connection manager is unavailable"
+            return None
+        if self.current_outgoing_plaintext is None:
+            self.last_send_result = "sending failure"
+            self.last_send_error = "secure packet is not ready"
+            return None
+        send_result = client_connection_manager.send_application_message(self.current_outgoing_plaintext)
+        if not send_result:
+            self.last_send_result = "sending failure"
+            self.last_send_error = "secure packet could not be send"
+            return None
+
+        self.last_send_result = "secure message sent successfully"
+        self.last_send_error = ""
+        return True
+
     def record_send_event(self):
         pass
     def report_send_success(self):
@@ -507,7 +604,6 @@ class ClientConnectionManager:
         if authentication_challenge_message.message_type != MessageType.AUTH_CHALLENGE:
             return None
         return authentication_challenge_message
-
     def send_authentication_response(self,authentication_response_message):
         if authentication_response_message is None:
             return False
@@ -515,7 +611,7 @@ class ClientConnectionManager:
             return False
         return self.send_application_message(authentication_response_message)
 
-    def secure_packet(self):
+    def send_secure_packet(self):
         pass
     def start_receive_loop(self):
         pass
@@ -532,8 +628,16 @@ class ClientConnectionManager:
         self.active_socket_handle = None
     def send_application_message(self,message):
         return message
+
     def receive_application_message(self):
-        pass
+        if not self.connection_state:
+            return None
+        if self.current_incoming_message is None:
+            return None
+        message = self.current_incoming_message
+        self.current_incoming_message = None
+        return message
+
     def detect_connection_loss(self):
         return not self.connection_state
     def notify_disconnect(self):
@@ -598,8 +702,29 @@ class ClientCryptoService:
         )
 
         return payload_text.encode("utf-8")
-    def encrypt_secure_message(self,message):
-        pass
+    def encrypt_secure_message(self,message,aes_key,iv):
+        if message is None:
+            return None
+        if aes_key is None or iv is None:
+            return None
+        if len(aes_key) != 32:
+            return None
+        if len(iv) != 16:
+            return None
+        if isinstance(message,str):
+            plaintext_bytes = message.encode("utf-8")
+        elif isinstance(message,bytes):
+            plaintext_bytes = message
+        else:
+            return None
+        try:
+            cipher = AES.new(aes_key,AES.MODE_CBC,iv)
+            ciphertext = cipher.encrypt(pad(plaintext_bytes,AES.block_size))
+            return ciphertext
+        except Exception:
+            return None
+
+
     def compute_integrity_value(self,message_bytes,integrity_key):
         if message_bytes is None or integrity_key is None:
             return None
@@ -639,8 +764,31 @@ class ClientCryptoService:
         plaintext = unpad(plaintext_padded,AES.block_size)
         return plaintext.decode("utf-8")
 
-    def decrypt_incoming_message(self,message):
-        pass
+    def decrypt_incoming_message(self,message,aes_key,iv):
+        if message is None:
+            return None
+        if aes_key is None or iv is None:
+            return None
+        if len(aes_key) != 32:
+            return None
+        if len(iv) != 16:
+            return None
+        if isinstance(message, bytes):
+             ciphertext_bytes = message
+        elif isinstance(message, str):
+            try:
+                ciphertext_bytes = bytes.fromhex(message)
+            except ValueError:
+                return None
+        else:
+            return None
+        try:
+            cipher = AES.new(aes_key, AES.MODE_CBC, iv)
+            plaintext_padded = cipher.decrypt(ciphertext_bytes)
+            plaintext_bytes = unpad(plaintext_padded,AES.block_size)
+            return plaintext_bytes.decode("utf-8")
+        except Exception:
+            return None
 
 
 
