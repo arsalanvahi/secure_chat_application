@@ -60,6 +60,32 @@ class AuthenticationInput:
     username:str
     password:str
 
+@dataclass
+class IncomingMessage:
+    packet:SecureMessagePacket | None
+    cihertext:bytes | None
+    hmac_value: bytes | None
+    packet_valid: bool = False
+
+@dataclass
+class VerificationResult:
+    success:bool
+    message:str
+    error:str
+    ciphertext_valid: bool =False
+
+@dataclass
+class DecryptionResult:
+    success: bool
+    message:str
+    error: str
+    plaintext: str | None=None
+
+
+
+
+
+
 
 # =========================================
 # 1. Client GUI / Presentation
@@ -476,22 +502,209 @@ class IncomingMessageProcessor:
         self.current_recovered_plaintext = None
         self.receive_in_progress = False
         self.last_receive_error = None
+        self.channel_key_store = None
+        self.client_session_manager = None
+        self.client_crypto_service  = None
     def handle_incoming_packet(self,current_incoming_packet):
-        pass
+        self.receive_in_progress =  True
+        self.last_receive_error = None
+        self.current_incoming_packet  = current_incoming_packet
+        self.current_verification_result = None
+        self.current_decryption_result = None
+        self.current_recovered_plaintext = None
+
+        if current_incoming_packet is None:
+            self.last_receive_error = "incoming packet is missed"
+            self.receive_in_progress = False
+            return False
+        parsed_message = self.parse_secure_packet(current_incoming_packet)
+        if parsed_message is None:
+            self.record_receive_failure()
+            self.receive_in_progress = False
+            return False
+        if not self.validate_receive_readiness():
+            self.record_receive_failure()
+            self.receive_in_progress = False
+            return False
+        verification_result = self.verify_incoming_packet(current_incoming_packet)
+        self.current_verification_result = verification_result
+        if verification_result is None or not VerificationResult.success:
+            self.reject_incoming_packet()
+            self.record_receive_failure()
+            self.receive_in_progress = False
+            return False
+
+        decryption_result = self.decrypt_verified_packet(current_incoming_packet)
+        self.current_decryption_result = decryption_result
+
+        if decryption_result is None or not decryption_result:
+            self.reject_incoming_packet()
+            self.record_receive_failure()
+            self.receive_in_progress = False
+            return False
+
+        self.current_decryption_result = decryption_result.plaintext
+        self.deliver_plaintext_message()
+        self.receive_in_progress = False
+        return True
+
+
+
+
+
+
     def parse_secure_packet(self,current_incoming_packet):
-        pass
+        if current_incoming_packet is None:
+            self.last_receive_error = "incoming packet is missing"
+            return None
+        if current_incoming_packet.message_type != MessageType.MSG_SEND:
+            self.last_receive_error = "incoming packet is invalid"
+            return None
+        if current_incoming_packet.ciphertext is None:
+            self.last_receive_error = "incoming ciphertext is missing"
+            return None
+        if current_incoming_packet.hmac is None:
+            self.last_receive_error = "incoming hmac is missing"
+            return None
+        incoming_message = IncomingMessage(
+            packet=current_incoming_packet,
+            cihertext=current_incoming_packet.ciphertext,
+            hmac_value=current_incoming_packet.hmac,
+            packet_valid=True
+            )
+        self.current_incoming_packet =incoming_message
+        return incoming_message
+
     def validate_receive_readiness(self):
-        pass
+        if not hasattr(self,"client_session_manager") or self.client_session_manager is None:
+            self.last_receive_error = "client session manager is not available"
+            return False
+
+        if not hasattr(self,"client_key_store") or self.client_key_store is None:
+            self.last_receive_error = "channel key store is not available"
+            return False
+
+        if self.client_session_manager.check_receive_readiness():
+            self.last_receive_error = "client is not ready to receive secure message"
+            return False
+        if not self.channel_key_store.check_key_availability():
+            self.last_receive_error = "channel keys are unavailable"
+            return False
+        return True
+
+
+
     def verify_incoming_packet(self,current_incoming_packet):
-        pass
+        if current_incoming_packet is None:
+            return VerificationResult(
+                success=False,
+                message="verification failed",
+                error="Incoming packet is missing",
+                ciphertext_valid=False
+            )
+        if not hasattr(self,"channel_key_store") or self.channel_key_store is None:
+            return VerificationResult(
+                success=False,
+                message="Verification failed",
+                error="channel key is missing",
+                ciphertext_valid=False
+                )
+        key_set = self.channel_key_store.retrieve_channel_keys()
+        if key_set is None:
+            return VerificationResult(
+                success=False,
+                message="Verification failed",
+                error="channel keys are unavailable",
+                ciphertext_valid=False
+            )
+        expected_hmac= hmac.new(
+            key_set.aes_key,
+            current_incoming_packet.ciphertext,
+            hashlib.sha3_512
+        ).digest()
+
+        if not hmac.compare_digest(current_incoming_packet,expected_hmac):
+            self.last_receive_error = "incoming packet HMAC is invalid"
+            return VerificationResult(
+                success=False,
+                message="Verification failed",
+                error="incoming HMAC is invalid",
+                ciphertext_valid=False
+            )
+        return VerificationResult(
+            success=True,
+            message="incoming packet verified successfully",
+            error= "",
+            ciphertext_valid=True
+        )
+
     def decrypt_verified_packet(self,current_incoming_packet):
-        pass
+        if current_incoming_packet is None:
+            return DecryptionResult(
+                success=False,
+                message="Decryption failed",
+                error = "Incoming packet is missing",
+                plaintext=None
+            )
+        if not hasattr(self,"channel_key_store") or self.channel_key_store is None:
+            return DecryptionResult(
+                success=False,
+                message="Decryption failed",
+                error="Channel key store is missing",
+                plaintext=None
+            )
+        if not hasattr(self,"client_crypto_service") or self.client_crypto_service is None:
+            return DecryptionResult(
+                success=False,
+                message="Decryption failed",
+                error= "Client crypto service is not available",
+                plaintext=None
+            )
+        key_set = self.channel_key_store.retrieve_channel_keys()
+        if key_set is None:
+            return DecryptionResult(
+                success=False,
+                message="Decryption failed",
+                error= "Channel keys are unavailable",
+                plaintext=None
+                )
+        plaintext  = self.client_crypto_service.decrypt_incoming_message(
+            current_incoming_packet.ciphertext,
+            key_set.aes_key,
+            key_set.iv
+        )
+        if plaintext is None:
+            self.last_receive_error = "Incoming packet decryption failed"
+            return DecryptionResult(
+                success=False,
+                message="Decryption failed",
+                error="Incoming packet decryption failed",
+                plaintext=None
+            )
+        return DecryptionResult(
+            success=True,
+            message="Incoming packet decrypted successfully",
+            error = "",
+            plaintext=plaintext
+        )
+
+
+
+
     def deliver_plaintext_message(self):
-        pass
+        if self.current_recovered_plaintext is None:
+            self.last_receive_error = "No plaintext available to deliver"
+            return None
+        return self.current_recovered_plaintext
     def reject_incoming_packet(self):
-        pass
+        self.current_verification_result = False
+        self.current_decryption_result = False
+        self.current_recovered_plaintext = None
+        return False
     def record_receive_failure(self):
-        pass
+        if self.last_receive_error is None:
+            self.last_receive_error = "incoming packet processing failure"
+        return self.last_receive_error
 
 class DisconnectController:
     def __init__(self):

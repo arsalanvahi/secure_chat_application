@@ -250,6 +250,32 @@ class ChannelAvailabilityState:
 
 
 
+@dataclass
+class RelayContext:
+    sender_connection_id: str
+    sender_session_info:ServerSessionInfo | None
+    sender_packet:SecureMessagePacket | None = None
+    sender_authenticated: bool = False
+    sender_channel:ChannelName | None= None
+    routing_allowed: bool = False
+    relay_in_progress: bool = False
+    resolved_recipient_ids:list=field(default_factory=list)
+    failed_recipient_ids:list=field(default_factory=list)
+
+
+
+@dataclass
+class RelayResult:
+    success:bool
+    message:str
+    error: str
+    sender_authenticated: bool = False
+    sender_channel: ChannelName | None=None
+    recipient_count:int = 0
+
+
+
+
 
 
 
@@ -798,21 +824,349 @@ class AuthenticationService:
 
 
 
+
 class MessageRelayService:
+    last_relay_result: None
+
     def __init__(self):
         self.current_relay_context = None
         self.last_relay_result  = None
         self.last_routing_error = None
-    def validate_sender_for_routing(self):
-        pass
-    def resolve_channel_recipients(self):
-        pass
-    def relay_secure_packet(self):
-        pass
-    def broadcast_packet_unchanged(self):
-        pass
+        
+    def validate_sender_for_routing(self,sender_connection_id, sender_session_info):
+        if sender_connection_id is None:
+            self.last_routing_error = "sender connection_id is missing"
+            self.current_relay_context = RelayContext(
+                sender_connection_id="",
+                sender_session_info= None,
+                sender_authenticated=False,
+                sender_channel=None,
+                routing_allowed=False,
+                relay_in_progress=False
+                )
+            self.last_relay_result = RelayResult(
+                success=False,
+                message="relay validation failed",
+                error="sender connection-id is missing",
+                sender_authenticated=False,
+                sender_channel=None,
+                recipient_count=0
+                )
+
+            return self.last_relay_result
+        if sender_session_info is None:
+            self.last_routing_error = "sender session_info was not found"
+            self.current_relay_context = RelayContext(
+                sender_connection_id=sender_connection_id,
+                sender_session_info=None,
+                sender_authenticated=False,
+                sender_channel=None,
+                routing_allowed=False,
+                relay_in_progress=False
+            )
+            self.last_relay_result = RelayResult(
+                success=False,
+                message="relay validation failed",
+                error="sender session_info was not found",
+                sender_authenticated=False,
+                sender_channel=None,
+                recipient_count=0
+            )
+            return self.last_relay_result
+        if not sender_session_info.authenticated:
+            self.last_routing_error = "sender is not authenticated"
+            self.current_relay_context = RelayContext(
+                sender_connection_id=sender_connection_id,
+                sender_session_info=sender_session_info,
+                sender_authenticated=False,
+                sender_channel=None,
+                routing_allowed=False,
+                relay_in_progress=False
+            )
+            self.last_relay_result = RelayResult(
+                success=False,
+                message="relay validation failed",
+                error="sender is not authenticated",
+                sender_authenticated=False,
+                sender_channel=sender_session_info.channel,
+                recipient_count=0
+            )
+            return self.last_relay_result
+        if sender_session_info.channel is None:
+            self.last_routing_error = "sender channel is missing"
+            self.current_relay_context = RelayContext(
+                sender_connection_id= sender_connection_id,
+                sender_session_info=sender_session_info,
+                sender_authenticated=True,
+                sender_channel=None,
+                routing_allowed=False,
+                relay_in_progress=False
+            )
+            self.last_relay_result = RelayResult(
+                success=False,
+                message="relay validation failed",
+                error="sender channel is missing",
+                sender_authenticated=True,
+                sender_channel=None,
+                recipient_count=0
+            )
+            return self.last_relay_result
+
+        #success
+        self.last_routing_error = ""
+        self.current_relay_context = RelayContext(
+            sender_connection_id=sender_connection_id,
+            sender_session_info=sender_session_info,
+            sender_authenticated=True,
+            sender_channel=sender_session_info.channel,
+            routing_allowed=True,
+            relay_in_progress=False
+        )
+        self.last_relay_result = RelayResult(
+            success=True,
+            message="Seder is valid for routing",
+            error="",
+            sender_authenticated=True,
+            sender_channel=sender_session_info.channel,
+            recipient_count=0
+        )
+        return self.last_relay_result
+
+
+    def resolve_channel_recipients(self,server_session_manager):
+        if server_session_manager is None:
+            self.last_routing_error = "server session manager is missing"
+            self.last_relay_result = RelayResult(
+                success=False,
+                message="Recipient resolution failed",
+                error="sender session manager is missing",
+                sender_authenticated=False,
+                sender_channel=None,
+                recipient_count=0
+            )
+            return self.last_relay_result
+        if self.current_relay_context is None:
+            self.last_routing_error = "relay context is missing"
+            self.last_relay_result = RelayResult(
+                success=False,
+                message="Recipient resolution failed",
+                error="Relay contex is missing",
+                sender_authenticated=True,
+                sender_channel=None,
+                recipient_count=0
+            )
+            return self.last_relay_result
+        if not self.current_relay_context.routing_allowed:
+            self.last_routing_error = "Routing is not allowed for the current sender"
+            self.last_relay_result = RelayResult(
+                success=False,
+                message="Recipient resolution failed",
+                error="routing is not allowed for the current sender",
+                sender_authenticated=self.current_relay_context.sender_authenticated,
+                sender_channel=self.current_relay_context.sender_channel,
+                recipient_count=0
+            )
+            return self.last_relay_result
+        sender_channel = self.current_relay_context.sender_channel
+        if sender_channel is None:
+            self.last_routing_error = "sender channel is missing"
+            self.last_relay_result = RelayResult(
+                success=False,
+                message="Recipient resolution failed",
+                error="sender channel is missing",
+                sender_authenticated=self.current_relay_context.sender_authenticated,
+                sender_channel=None,
+                recipient_count=0
+            )
+            return self.last_relay_result
+        recipient_ids = server_session_manager.resolve_recipients_for_channel(sender_channel)
+        if recipient_ids is None:
+            recipient_ids = []
+        self.current_relay_context.resolved_recipient_ids = recipient_ids
+
+        self.last_routing_error = None
+        self.last_relay_result = RelayResult(
+            success=True,
+            message="channel recipients resolved successfully",
+            error="",
+            sender_authenticated=self.current_relay_context.sender_authenticated,
+            sender_channel=sender_channel,
+            recipient_count=len(recipient_ids)
+        )
+        return self.last_relay_result
+
+
+
+
+    def relay_secure_packet(self,server_transport_manager):
+        if server_transport_manager is None:
+            self.last_routing_error = "server transport manager is missing"
+            self.last_relay_result = RelayResult(
+                success=False,
+                message="Relay failed",
+                error="server transport manager is missing",
+                sender_authenticated=False,
+                sender_channel=None,
+                recipient_count=0
+            )
+            return self.last_relay_result
+        if self.current_relay_context is None:
+            self.last_routing_error = "Relay context is missing"
+            self.last_relay_result = RelayResult(
+                success=False,
+                message="Relay failed",
+                error="Relay context is missing",
+                sender_authenticated=False,
+                sender_channel=None,
+                recipient_count=0
+            )
+            return self.last_relay_result
+        if self.current_relay_context.routing_allowed is None:
+            self.last_routing_error = "Routing is not allowed for the sender"
+            self.last_relay_result = RelayResult(
+                success=False,
+                message="Relay failed",
+                error="Routing is not allowed for the sender",
+                sender_authenticated=self.current_relay_context.sender_authenticated,
+                sender_channel=self.current_relay_context.sender_channel,
+                recipient_count=0
+            )
+            return self.last_relay_result
+        if self.current_relay_context.secure_packet is None:
+            self.last_routing_error = "Secure packet is missing"
+            self.last_relay_result = RelayResult(
+                success=False,
+                message="Relay failed",
+                error="Secure packet is missing",
+                sender_authenticated=self.current_relay_context.sender_authenticated,
+                sender_channel=self.current_relay_context.sender_channel,
+                recipient_count=0
+            )
+            return self.last_relay_result
+        recipient_ids =self.current_relay_context.resolved_recipient_ids
+        if recipient_ids is None:
+            recipient_ids = []
+
+
+        self.current_relay_context.relay_in_progress  = True
+        broadcast_result = self.broadcast_packet_unchanged(
+            recipient_ids,
+            self.current_relay_context.secure_packet,
+            server_transport_manager
+        )
+        self.current_relay_context.relay_in_progress = False
+        if not broadcast_result:
+            self.last_routing_error = "broadcast relay failed"
+            self.last_relay_result = RelayResult(
+                success=False,
+                message="Relay failed",
+                error="broadcast relay failed",
+                sender_authenticated=self.current_relay_context.sender_authenticated,
+                sender_channel=self.current_relay_context.sender_channel,
+                recipient_count=0
+            )
+            return self.last_relay_result
+
+
+        self.last_routing_error = None
+        self.last_relay_result = RelayResult(
+            success=True,
+            message="Secure packet relayed successfully",
+            error="broadcast relay failed",
+            sender_authenticated=self.current_relay_context.sender_authenticated,
+            sender_channel=self.current_relay_context.sender_channel,
+            recipient_count=0
+        )
+        return self.current_relay_context
+
+
+
+
+
+
+
+
+    def broadcast_packet_unchanged(self,recipient_ids,secure_packet, server_transport_manager):
+        if recipient_ids is None:
+            self.last_routing_error = "Recipient list is missing"
+            return False
+        if not isinstance(recipient_ids,list):
+            self.last_routing_error = "Recipient list format is invalid"
+            return False
+        if secure_packet is None:
+            self.last_routing_error = "Secure packet is missing"
+            return False
+        if server_transport_manager is None:
+            self.last_routing_error = "Server transport manager is missing"
+            return False
+        if len(recipient_ids) == 0:
+            self.last_routing_error = None
+            return True
+        broadcast_results = server_transport_manager.broadcast_packet_to_recipients(
+            recipient_ids,
+            secure_packet
+        )
+        if broadcast_results is None:
+            self.last_routing_error = "broadcast operation failed"
+            return False
+        failed_recipients = []
+        for recipient_ids,sender_result in broadcast_results.items():
+            if not sender_result:
+                failed_recipients.append(recipient_ids)
+
+        if failed_recipients:
+            self.last_routing_error = ("broadcast failed for recipients "+ " , ".join(failed_recipients))
+            return False
+        self.last_routing_error = None
+        return True
+
+
+
     def handle_recipient_disconnect_during_relay(self):
-        pass
+        if self.current_relay_context is None:
+            self.last_routing_error = "Relay context is missing"
+            self.last_relay_result = RelayResult(
+                success=False,
+                message="Recipient disconnect handling failed",
+                error="Relay context is missing",
+                sender_authenticated=False,
+                sender_channel=None,
+                recipient_count=0
+            )
+            return self.last_relay_result
+        failed_recipient_ids = getattr(self.current_relay_context,"failed_recipient_ids")
+
+        if failed_recipient_ids is None:
+            failed_recipient_ids = []
+        if len(failed_recipient_ids) == 0:
+            self.last_routing_error = None
+            self.last_relay_result = RelayResult(
+                success=True,
+                message="No recipent disconnects occured during relay",
+                error="",
+                sender_authenticated=self.current_relay_context.sender_authenticated,
+                sender_channel=self.current_relay_context.sender_channel,
+                recipient_count=len(self.current_relay_context.resolved_recipient_ids)
+                )
+            return self.last_relay_result
+        successful_count = len(self.current_relay_context.resolved_recipient_ids) - len(failed_recipient_ids)
+        if successful_count < 0:
+            successful_count = 0
+        self.last_routing_error = ("Recipient disconnecs occured duing relay"+" , ".join(failed_recipient_ids))
+        self.last_relay_result = RelayResult(
+            success=True,
+            message="Relay completed with recipient disconnects",
+            error=self.last_routing_error,
+            sender_authenticated=self.current_relay_context.sender_authenticated,
+            sender_channel=self.current_relay_context.sender_channel,
+            recipient_count=successful_count
+        )
+        return self.last_relay_result
+
+
+
+
+
     def record_relay_event(self):
         pass
     def notify_traffic_monitor(self):
