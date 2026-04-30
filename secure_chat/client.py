@@ -1,6 +1,8 @@
 #client.py should be organized in this order
 
 import hmac
+from multiprocessing import connection
+
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from Crypto.Signature import pkcs1_15
@@ -331,7 +333,30 @@ class SecureMessageSender:
         self.last_send_result = None
         self.last_send_error = None
     def validate_send_readiness(self,session_manager):
-        pass
+        if session_manager is None:
+            self.last_send_result = "sending failure"
+            self.last_send_error = "session manager is not available"
+            return False
+        if not session_manager.get_connection_state():
+            self.last_send_error = "sending failure"
+            self.last_send_result = "client is not connected"
+            return False
+        if not session_manager.get_authentication_state():
+            self.last_send_result = "sending failure"
+            self.last_send_result ="client is not authenticated"
+            return False
+        if not session_manager.channel_ready:
+            self.last_send_result = "sending failure"
+            self.last_send_error = "channel is not ready"
+            return False
+        if not session_manager.check_send_readiness():
+            self.last_send_result = "sending failure"
+            self.last_send_error = "send readiness check failure"
+            return False
+        self.last_send_result = None
+        self.last_send_error = None
+        return True
+
     def validate_message_content(self):
         pass
     def prepare_outgoing_plaintext(self):
