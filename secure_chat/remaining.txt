@@ -1,0 +1,17 @@
+Client
+
+AuthenticationController.handle_authentication_result(...)
+SecureMessageSender.record_send_event()
+SecureMessageSender.report_send_success()
+SecureMessageSender.handle_send_failure()
+
+Server
+
+setup_server() -> handle_authentication_response_packet(...)
+ChannelKeyManager.validate_channel_key_generation_request(...) (restore empty-string check)
+MessageRelayService.record_relay_event()
+MessageRelayService.notify_traffic_monitor()
+small relay cleanup in:
+
+broadcast_packet_unchanged(...)
+handle_recipient_disconnect_during_relay(...)

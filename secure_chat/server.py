@@ -1101,15 +1101,23 @@ class MessageRelayService:
         if not isinstance(recipient_ids,(list,set,tuple)):
             self.last_routing_error = "Recipient list format is invalid"
             return False
+        recipient_ids = list(recipient_ids)
+
         if secure_packet is None:
             self.last_routing_error = "Secure packet is missing"
             return False
         if server_transport_manager is None:
             self.last_routing_error = "Server transport manager is missing"
             return False
+        #reset
+        if self.current_relay_context is not None:
+            self.current_relay_context.failed_recipient_ids = []
+
         if len(recipient_ids) == 0:
             self.last_routing_error = None
             return True
+
+
         broadcast_results = server_transport_manager.broadcast_packet_to_recipients(
             recipient_ids,
             secure_packet
@@ -1118,16 +1126,18 @@ class MessageRelayService:
             self.last_routing_error = "broadcast operation failed"
             return False
         failed_recipients = []
+
         for recipient_id,sender_result in broadcast_results.items():
             if not sender_result:
                 failed_recipients.append(recipient_id)
+
         if self.current_relay_context is not None:
             self.current_relay_context.failed_recipient_ids = failed_recipients
 
 
 
-        if failed_recipients:
 
+        if failed_recipients:
             self.last_routing_error = ("broadcast failed for recipients "+ " , ".join(failed_recipients))
             return False
         self.last_routing_error = None
@@ -1147,10 +1157,12 @@ class MessageRelayService:
                 recipient_count=0
             )
             return self.last_relay_result
+
         failed_recipient_ids = getattr(self.current_relay_context,"failed_recipient_ids",[])
 
         if failed_recipient_ids is None:
             failed_recipient_ids = []
+
         if len(failed_recipient_ids) == 0:
             self.last_routing_error = None
             self.last_relay_result = RelayResult(
@@ -1162,6 +1174,7 @@ class MessageRelayService:
                 recipient_count=len(self.current_relay_context.resolved_recipient_ids)
                 )
             return self.last_relay_result
+
         successful_count = len(self.current_relay_context.resolved_recipient_ids) - len(failed_recipient_ids)
         if successful_count < 0:
             successful_count = 0
@@ -2165,8 +2178,7 @@ class ServerRuntimeContext:
 
         return True
 
-    def register_runtime_structure(self):
-        pass
+
     def retrieve_runtime_structure(self):
         pass
     def set_channel_availability(self,channel_name,available):
@@ -2254,6 +2266,7 @@ def setup_server():
     def handle_authentication_response_packet(connection_id, packet):
         authentication_service.current_connection_id = connection_id
 
+        # 1. Verify authentication response
         authentication_success = authentication_service.verify_authentication_response(
             packet,
             server_crypto_service,
@@ -2262,23 +2275,26 @@ def setup_server():
 
         channel_key_set = None
 
+        # 2. If authentication succeeded, resolve subscribed channel and retrieve keys
         if authentication_success:
-            username = authentication_service.current_authentication_request_context.username
-            enrollment_record = enrollment_repository.retrieve_enrollment_record_by_username(username)
+            if authentication_service.current_authentication_request_context is not None:
+                username = authentication_service.current_authentication_request_context.username
+                enrollment_record = enrollment_repository.retrieve_enrollment_record_by_username(username)
 
-            if enrollment_record is not None:
-                subscribed_channel = enrollment_record.subscribed_channel
+                if enrollment_record is not None:
+                    subscribed_channel = enrollment_record.subscribed_channel
 
-                if channel_key_manager.check_channel_availability(subscribed_channel):
-                    channel_key_set = channel_key_manager.retrieve_channel_keys(subscribed_channel)
+                    if channel_key_manager.check_channel_availability(subscribed_channel):
+                        channel_key_set = channel_key_manager.retrieve_channel_keys(subscribed_channel)
 
+        # 3. Build channel-aware authentication result
         auth_result = authentication_service.build_authentication_result(
             authentication_success,
             channel_key_set
         )
-
         authentication_service.current_authentication_result = auth_result
 
+        # 4. Protect result (encrypt + sign), optionally including channel keys
         protected_message = authentication_service.protect_authentication_result(
             server_crypto_service,
             enrollment_repository,
@@ -2288,6 +2304,7 @@ def setup_server():
         if protected_message is None:
             return None
 
+        # 5. Activate authenticated session only if full SUCCESS
         if auth_result.status == AuthStatus.SUCCESS:
             authentication_service.activate_authenticated_session(
                 server_session_manager,
@@ -2295,32 +2312,6 @@ def setup_server():
             )
 
         return protected_message
-
-##################################################################
-    def handle_secure_message_packet(connection_id, packet):
-        sender_session_info = server_session_manager.get_session_by_identifier(connection_id)
-
-        validation_result = message_relay_service.validate_sender_for_routing(
-            connection_id,
-            sender_session_info
-        )
-        if not validation_result.success:
-            return None
-
-        message_relay_service.current_relay_context.secure_packet = packet
-
-        recipient_result = message_relay_service.resolve_channel_recipients(
-            server_session_manager
-        )
-        if not recipient_result.success:
-            return None
-
-        relay_result = message_relay_service.relay_secure_packet(
-            server_transport_manager
-        )
-
-        return relay_result
-
 ####################################################################
 
     server_transport_manager.register_transport_handlers({

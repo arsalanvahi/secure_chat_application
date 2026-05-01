@@ -128,7 +128,10 @@ class ClientAppCoordinator:
 
 
     def start_connection_configuration(self):
-        pass
+        self.active_workflow = self.client_connection_manager
+        self.current_view_context = "connection_configuration_mode"
+        self.pending_user_action = None
+        return self.client_connection_manager.get_current_connection_settings()
     def start_registration_workflow(self):
         self.active_workflow = self.registration_controller
         self.current_view_context = "registration-mode"
@@ -138,7 +141,11 @@ class ClientAppCoordinator:
         self.current_view_context = "authentication-mode"
         self.pending_user_action = None
     def start_secure_send_workflow(self):
-        pass
+        self.active_workflow = self.secure_message_sender
+        self.current_view_context = "secure_send_mode"
+        self.pending_user_action = None
+        return self.client_session_manager.check_receive_readiness()
+
     def open_authentication_result_view(self):
         pass
     def open_message_flow_view(self):
@@ -151,7 +158,68 @@ class ClientAppCoordinator:
             self.client_session_manager
         )
     def route_user_action_to_target_workflow(self):
-        pass
+        if self.active_workflow is None:
+            self.pending_user_action = None
+            return False
+        if self.pending_user_action is None:
+            return False
+
+        action = self.pending_user_action
+        self.pending_user_action = None
+
+        #connection configuration workflow
+        if self.active_workflow == self.connection_settings_manager:
+            if action == "load_connection_settings":
+                return self.connection_settings_manager.load_current_connection_settings
+            if action == "get_connection_settings":
+                return self.connection_settings_manager.get_current_connection_settings()
+            if action == "validate_connection_settings":
+                return self.connection_settings_manager.validate_connection_settings()
+            return False
+        #registration workflow
+        if self.active_workflow == self.registration_controller:
+            if action == "validate_registration_input":
+                return self.registration_controller.validate_resigstration_input()
+
+            return False
+        #Authentication workflow
+        if self.active_workflow == self.authentication_controller:
+            if action == "validate_authentication_input":
+                return self.authentication_controller.validate_authentication_input()
+            if action == "request_authentication":
+                return self.authentication_controller.request_authentication()
+
+            return False
+        #send secure message workflow
+        if self.active_workflow == self.secure_message_sender:
+            if action=="validate_send_readiness":
+                return self.secure_message_sender.validate_send_readiness()
+            if action == "validate_message_content":
+                return self.secure_message_sender.validate_message_content()
+            if action == "prepare_outgoing_plaintext":
+                return self.secure_message_sender.prepare_outgoing_plaintext()
+            if action == "secure_packet":
+                prepared_plaintext = self.secure_message_sender.current_outgoing_plaintext
+                return self.secure_message_sender.secure_packet(
+                prepared_plaintext,
+                self.client_crypto_service
+                    )
+            if action == "send_secure_message":
+                return self.secure_message_sender.send_secure_message(
+                    self.client_connection_manager
+                )
+            return False
+        return False
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -247,7 +315,19 @@ class RegistrationController:
         return False
 
     def complete_registration(self):
-        pass
+        if self.last_registration_result is None:
+            self.last_registration_error = "Registration result is missing"
+            self.registration_in_progress = False
+            return False
+        if not self.last_registration_result.success:
+            self.last_registration_error = "Registration has not completed successfully"
+            self.registration_in_progress = False
+            return False
+        self.pending_registration_input = None
+        self.registration_in_progress = False
+        self.last_registration_error = None
+        return True
+    
     def retry_registration(self):
         pass
     def abort_registration(self):
@@ -338,6 +418,11 @@ class AuthenticationController:
             self.last_authentication_error = "Authentication result message is missing"
             self.authentication_in_progress = False
             return False
+        if self.pending_authentication_input is None:
+            self.last_authentication_error = "Authentication is missing"
+            self.authentication_in_progress = False
+            return False
+
         #verify server signature
         if not client_crypto_service.verify_digital_signature(
             authentication_result_message,
@@ -345,21 +430,82 @@ class AuthenticationController:
         ):
             self.last_authentication_error = "Invalid server signature"
             return False
-        #derive AES key + IV from reversed password hash
+
+
+        #derive response decryption material
         derived_material = client_crypto_service.derive_response_decryption_material_from_password(self.pending_authentication_input.password)
+        if derived_material is None:
+            self.last_authentication_error = "response decryption material derivation failed"
+            self.authentication_in_progress = False
+            return False
 
 
-        #Decrypt response
+
+        #Decrypt protected response
         plaintext = client_crypto_service.decrypt_protected_response(authentication_result_message=authentication_result_message,
                                                                      derived_material=derived_material)
+        if plaintext is None:
+            self.last_authentication_error = "Authentication result decryption failed"
+            self.authentication_in_progress = False
+            return False
+
         #pars plaintext
-        pars = plaintext.split("|")
+        parts = plaintext.split("|")
+        if len(parts) < 4:
+            self.last_authentication_error = "authentication result format is invalid"
+            self.authentication_in_progress = False
+            return False
+
+        try:
+            status = AuthStatus(parts[0])
+        except ValueError:
+            self.last_authentication_error = "Authentication status is invalid"
+            self.authentication_in_progress = False
+            return False
+        message = parts[1]
+        channel_available = (parts[2]=="True")
+        channel_keys_loaded = (parts[3]=="True")
+
         self.last_authentication_result = AuthenticationResult(
-            status=AuthStatus(pars[0]),
-            message=pars[1],
-            channel_available=(pars[2]=="True"),
-            channel_keys_loaded=(pars[3]=="True")
+            status=status,
+            message=message,
+            channel_available=channel_available,
+            channel_keys_loaded=channel_keys_loaded
         )
+        if channel_keys_loaded:
+            if len(parts)<7:
+                self.last_authentication_error = "Channel key material is missing from authentication result"
+                self.authentication_in_progress = False
+                return False
+            try:
+                aes_key = bytes.fromhex(parts[4])
+                iv = bytes.fromhex(parts[5])
+                hmac_key = bytes.fromhex(parts[6])
+            except ValueError:
+                self.last_authentication_error = "channel key format is invalid"
+                self.authentication_in_progress = False
+                return False
+            key_set = ChannelKeySet(
+                aes_key=aes_key,
+                iv=iv,
+                hmac_key=hmac_key,
+                keys_loaded=True
+            )
+            if hasattr(self,"channel_key_store") and self.channel_key_store is not None:
+                self.channel_key_store.store_channel_keys(key_set)
+
+        #clear if not successful
+        if hasattr(self,"channel_key_store") and self.channel_key_store is not None:
+            if not channel_keys_loaded:
+                self.channel_key_store.clear_channel_keys()
+
+        #update session state
+        if hasattr(self,"client_session_manager") and self.client_session_manager is not None:
+            self.client_session_manager.set_authentication_state(status==AuthStatus.SUCCESS)
+            self.client_session_manager.set_channel_readiness(channel_available and channel_keys_loaded)
+
+        self.authentication_in_progress = False
+        self.last_authentication_error = None
         return True
 
 
@@ -507,6 +653,9 @@ class SecureMessageSender:
 
     def record_send_event(self):
         pass
+
+
+
     def report_send_success(self):
         pass
     def handle_send_failure(self):
@@ -613,6 +762,10 @@ class IncomingMessageProcessor:
         if not self.channel_key_store.check_key_availability():
             self.last_receive_error = "channel keys are unavailable"
             return False
+
+
+
+
         return True
 
 
@@ -816,6 +969,7 @@ class ClientConnectionManager:
         self.registered_disconnect_handler = []
         self.remote_endpoint_info = None
         self.current_incoming_message = None
+        self.current_outgoing_secure_packet = None
     def connect_to_server(self,socket_handle):
         self.active_socket_handle = socket_handle
         self.connection_state = True
@@ -849,9 +1003,38 @@ class ClientConnectionManager:
         return self.send_application_message(authentication_response_message)
 
     def send_secure_packet(self):
-        pass
+        if self.current_outgoing_secure_packet is None:
+            return False
+        if not isinstance(self.current_outgoing_secure_packet,SecureMessagePacket):
+            return False
+        if self.current_outgoing_secure_packet.message_type != MessageType.MSG_SEND:
+            return False
+        send_result = self.send_application_message(self.current_outgoing_secure_packet)
+        if not send_result:
+            return False
+        return True
+
+
+
     def start_receive_loop(self):
-        pass
+        if not self.connection_state:
+            self.receive_loop_state = False
+            return False
+        self.receive_loop_state = True
+
+        incoming_message = self.receive_application_message()
+        if incoming_message is None:
+            self.receive_loop_state  = False
+            return False
+        message_type = getattr(incoming_message,"message_type",None)
+        if message_type is None:
+            self.receive_loop_state = False
+            return False
+        handler(incoming_message)
+        self.receive_loop_state = False
+        return True
+
+
     def register_incoming_packet_handler(self,message_type, handler):
         self.registered_packet_handler[message_type] = handler
     def register_disconnect_handler(self,handler):
