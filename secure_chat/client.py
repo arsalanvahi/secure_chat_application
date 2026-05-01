@@ -2,8 +2,6 @@
 
 import hmac
 
-
-
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad, pad
 from Crypto.Signature import pkcs1_15
@@ -117,6 +115,8 @@ class ClientAppCoordinator:
         self.incoming_message_processor.client_session_manager = self.client_session_manager
         self.incoming_message_processor.client_crypto_service = self.client_crypto_service
 
+        self.connection_settings_manager = ConnectionSettingsManager()
+
 
         self.authentication_controller.channel_key_store = self.channel_key_store
         self.authentication_controller.client_session_manager = self.client_session_manager
@@ -128,10 +128,10 @@ class ClientAppCoordinator:
 
 
     def start_connection_configuration(self):
-        self.active_workflow = self.client_connection_manager
+        self.active_workflow = self.connection_settings_manager
         self.current_view_context = "connection_configuration_mode"
         self.pending_user_action = None
-        return self.client_connection_manager.get_current_connection_settings()
+        return self.connection_settings_manager.get_current_connection_settings()
     def start_registration_workflow(self):
         self.active_workflow = self.registration_controller
         self.current_view_context = "registration-mode"
@@ -144,7 +144,7 @@ class ClientAppCoordinator:
         self.active_workflow = self.secure_message_sender
         self.current_view_context = "secure_send_mode"
         self.pending_user_action = None
-        return self.client_session_manager.check_receive_readiness()
+        return self.client_session_manager.check_send_readiness()
 
     def open_authentication_result_view(self):
         pass
@@ -170,7 +170,7 @@ class ClientAppCoordinator:
         #connection configuration workflow
         if self.active_workflow == self.connection_settings_manager:
             if action == "load_connection_settings":
-                return self.connection_settings_manager.load_current_connection_settings
+                return self.connection_settings_manager.load_current_connection_settings()
             if action == "get_connection_settings":
                 return self.connection_settings_manager.get_current_connection_settings()
             if action == "validate_connection_settings":
@@ -179,7 +179,7 @@ class ClientAppCoordinator:
         #registration workflow
         if self.active_workflow == self.registration_controller:
             if action == "validate_registration_input":
-                return self.registration_controller.validate_resigstration_input()
+                return self.registration_controller.validate_registration_input()
 
             return False
         #Authentication workflow
@@ -193,7 +193,7 @@ class ClientAppCoordinator:
         #send secure message workflow
         if self.active_workflow == self.secure_message_sender:
             if action=="validate_send_readiness":
-                return self.secure_message_sender.validate_send_readiness()
+                return self.secure_message_sender.validate_send_readiness(self.client_session_manager)
             if action == "validate_message_content":
                 return self.secure_message_sender.validate_message_content()
             if action == "prepare_outgoing_plaintext":
@@ -327,11 +327,32 @@ class RegistrationController:
         self.registration_in_progress = False
         self.last_registration_error = None
         return True
-    
+
     def retry_registration(self):
-        pass
+        if self.pending_registration_input is None:
+            self.last_registration_error = "No registration input available for retry"
+            self.registration_in_progress = False
+            return False
+        if self.last_registration_result is None:
+            self.last_registration_error = "No registration result available for entry"
+            self.registration_in_progress = False
+            return False
+        if not self.last_registration_result.retry_possible:
+            self.last_registration_error = "Registration retry is not allowed"
+            self.registration_in_progress = False
+            return False
+        self.registration_in_progress = True
+        self.last_registration_result = None
+        self.last_registration_error = None
+        return True
     def abort_registration(self):
-        pass
+        self.pending_registration_input = None
+        self.registration_in_progress = False
+        self.last_registration_result = None
+        self.last_registration_error = None
+        return True
+
+
 
 
 
@@ -429,6 +450,7 @@ class AuthenticationController:
             client_crypto_service.server_signature_verification_public_keys
         ):
             self.last_authentication_error = "Invalid server signature"
+            self.authentication_in_progress = False
             return False
 
 
@@ -510,11 +532,52 @@ class AuthenticationController:
 
 
     def complete_authentication(self):
-        pass
+        if self.last_authentication_result is None:
+            self.last_authentication_error = "Authentication result is missing"
+            self.authentication_in_progress = False
+            return False
+        if self.last_authentication_result.status != AuthStatus.SUCCESS:
+            self.last_authentication_error = "Authentication has not completed successfully"
+            self.authentication_in_progress = False
+            return False
+        self.pending_authentication_input = None
+        self.pending_challenge = None
+        self.authentication_in_progress = False
+        self.last_authentication_error = None
+        return True
+
     def retry_authentication(self):
-        pass
+        if self.pending_authentication_input is None:
+            self.last_authentication_error = "No authentication input available for entry"
+            self.authentication_in_progress = False
+            return False
+        if self.last_authentication_result is None:
+            self.last_authentication_error = "NO authentication result available for retry"
+            self.authentication_in_progress = False
+            return False
+
+        if self.last_authentication_result.status == AuthStatus.SUCCESS:
+            self.last_authentication_error = "Authentication error is not allowed after succes"
+            self.authentication_in_progress = False
+            return False
+        self.authentication_in_progress = True
+        self.pending_challenge = None
+        self.last_authentication_result = None
+        self.last_authentication_error = None
+        return True
+
+
+
     def abort_authentication(self):
-        pass
+        self.pending_username = None
+        self.pending_authentication_input = None
+        self.pending_challenge = None
+        self.authentication_in_progress = False
+        self.last_authentication_result = None
+        self.last_authentication_error = None
+        return True
+
+
 class SecureMessageSender:
     def __init__(self):
         self.current_outgoing_plaintext = None
@@ -523,6 +586,7 @@ class SecureMessageSender:
         self.last_send_result = None
         self.last_send_error = None
         self.channel_key_store = None
+        self.last_send_event  = None
     def validate_send_readiness(self,session_manager):
         if session_manager is None:
             self.last_send_error = "session manager is not available"
@@ -573,7 +637,7 @@ class SecureMessageSender:
         if not isinstance(self.current_outgoing_plaintext,str):
             self.last_send_result = "sending failure"
             self.last_send_error = "Message content format is not ready"
-            return False
+            return None
         prepared_plaintext = self.current_outgoing_plaintext.strip()
         self.current_outgoing_plaintext = prepared_plaintext
 
@@ -652,14 +716,45 @@ class SecureMessageSender:
         return True
 
     def record_send_event(self):
-        pass
+        if self.current_protected_packet is None:
+            self.last_send_result = "sending failure"
+            self.last_send_error = "no secure packet available for sending"
+            return None
+        event = {
+            "message_type":self.current_protected_packet.message_type,
+            "plaintext_length":len(self.current_outgoing_plaintext)
+            if isinstance(self.current_outgoing_plaintext,str)
+            else 0,
+            "ciphertext_length":len(self.current_protected_packet.ciphertext)
+            if self.current_protected_packet.ciphertext is not None else 0,
+            "hmac_length":len(self.current_protected_packet.hmac)
+            if self.current_protected_packet.hmac is not None
+            else 0
+        }
+        self.last_send_event = event
+        self.last_send_result = "send event recorded"
+        self.last_send_error = None
+        return event
 
 
 
     def report_send_success(self):
-        pass
+        if self.current_protected_packet is None:
+            self.last_send_result = "sending failure"
+            self.last_send_error = "No secure packet available to report"
+            return False
+        self.last_send_result = "message was sent succssfully"
+        self.last_send_error = None
+        self.send_in_progress = False
+        return True
+
+
     def handle_send_failure(self):
-        pass
+        self.send_in_progress = False
+        if self.last_send_error is None:
+            self.last_send_error = "secure message sending failed"
+        self.last_send_result = "sending failure"
+        return False
 class IncomingMessageProcessor:
     def __init__(self):
         self.current_incoming_packet = None
@@ -1028,6 +1123,10 @@ class ClientConnectionManager:
             return False
         message_type = getattr(incoming_message,"message_type",None)
         if message_type is None:
+            self.receive_loop_state = False
+            return False
+        handler = self.registered_packet_handler.get(message_type)
+        if handler is None:
             self.receive_loop_state = False
             return False
         handler(incoming_message)

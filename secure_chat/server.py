@@ -2313,7 +2313,30 @@ def setup_server():
 
         return protected_message
 ####################################################################
+    def handle_secure_message_packet(connection_id, packet):
+        sender_session_info = server_session_manager.get_session_by_identifier(connection_id)
 
+        validation_result = message_relay_service.validate_sender_for_routing(
+            connection_id,
+            sender_session_info
+        )
+        if not validation_result.success:
+            return None
+
+        message_relay_service.current_relay_context.secure_packet = packet
+
+        recipient_result = message_relay_service.resolve_channel_recipients(
+            server_session_manager
+        )
+        if not recipient_result.success:
+            return None
+
+        relay_result = message_relay_service.relay_secure_packet(
+            server_transport_manager
+        )
+
+        return relay_result
+    ################################################################
     server_transport_manager.register_transport_handlers({
         MessageType.REG_REQ: handle_registration_packet,
         MessageType.AUTH_REQ:handle_authentication_request_packet,

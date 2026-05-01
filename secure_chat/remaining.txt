@@ -15,3 +15,7 @@ small relay cleanup in:
 
 broadcast_packet_unchanged(...)
 handle_recipient_disconnect_during_relay(...)
+
+complete_authentication()
+retry_authentication()
+abort_authentication()
