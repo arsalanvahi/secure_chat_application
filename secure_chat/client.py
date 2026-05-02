@@ -973,8 +973,6 @@ class IncomingMessageProcessor:
             return None
         return self.current_recovered_plaintext
     def reject_incoming_packet(self):
-        self.current_verification_result = False
-        self.current_decryption_result = False
         self.current_recovered_plaintext = None
         return False
     def record_receive_failure(self):
@@ -1333,14 +1331,19 @@ class ClientCryptoService:
             return None
         if derived_material is None:
             return None
-        cipher = AES.new(
-            derived_material["response_decryption_key"],
-            AES.MODE_CBC,
-            derived_material["response_decryption_iv"]
-        )
-        plaintext_padded = cipher.decrypt(authentication_result_message.encrypted_result)
-        plaintext = unpad(plaintext_padded,AES.block_size)
-        return plaintext.decode("utf-8")
+
+        try:
+            cipher = AES.new(
+                derived_material["response_decryption_key"],
+                AES.MODE_CBC,
+                derived_material["response_decryption_iv"]
+                )
+            plaintext_padded = cipher.decrypt(authentication_result_message.encrypted_result)
+            plaintext = unpad(plaintext_padded,AES.block_size)
+            return plaintext.decode("utf-8")
+        except Exception:
+            return None
+
 
     def decrypt_incoming_message(self,message,aes_key,iv):
         if message is None:
