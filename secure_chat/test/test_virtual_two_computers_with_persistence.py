@@ -572,7 +572,7 @@ if __name__ == "__main__":
     print_banner("VIRTUAL TWO-COMPUTER TCP TEST WITH PERSISTENCE")
 
     SERVER_PORT = 50558
-    DB_FILE = "secure_chat.db"
+    DB_FILE = "../secure_chat.db"
 
     # This IP is intentionally chosen from a real network interface if possible,
     # so the clients connect through the LAN stack instead of hardcoded 127.0.0.1.

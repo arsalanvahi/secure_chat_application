@@ -498,7 +498,7 @@ if __name__ == "__main__":
 
     SERVER_IP = "127.0.0.1"
     SERVER_PORT = 50557
-    DB_FILE = "secure_chat.db"
+    DB_FILE = "../secure_chat.db"
 
     # -------------------------------------------------
     # 0. Clean previous DB
