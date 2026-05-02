@@ -285,7 +285,7 @@ def encode_bytes(value:bytes|None):
 def decode_bytes(value:str|None):
     if value is None:
         return None
-    return base64.b16decode(value.encode("utf_8"))
+    return base64.b64decode(value.encode("utf_8"))
 
 
 def message_to_dict(message):
@@ -299,31 +299,36 @@ def message_to_dict(message):
     if isinstance(message,RegistrationResponseMessage):
         return {
             "message_type":message.message_type.value,
-            "result_code":message.result_message,
+            "result_code":message.result_code,
             "result_message":message.result_message,
-            "signature":message.signature
+            "signature":encode_bytes(message.signature)
             }
     if isinstance(message,AuthenticationResultMessage):
         return {
             "message_type":message.message_type.value,
-            "encrypted_result":message.encrypted_result,
-            "signature":message.signature
+            "encrypted_result":encode_bytes(message.encrypted_result),
+            "signature":encode_bytes(message.signature)
             }
     if isinstance(message,AuthenticationChallengeMessage):
         return {
             "message_type":message.message_type.value,
-            "challenge":message.challenge
+            "challenge":encode_bytes(message.challenge)
             }
     if isinstance(message,AuthenticationResponseMessage):
         return {
             "message_type":message.message_type.value,
-            "hmac_response":message.hmac_response
+            "hmac_response":encode_bytes(message.hmac_response)
+        }
+    if isinstance(message, AuthenticationRequestMessage):
+        return {
+            "message_type": message.message_type.value,
+            "username": message.username
         }
     if isinstance(message,SecureMessagePacket):
         return {
             "message_type":message.message_type.value,
-            "ciphertext":message.ciphertext,
-            "hmac":message.hmac
+            "ciphertext":encode_bytes(message.ciphertext),
+            "hmac":encode_bytes(message.hmac)
         }
     if isinstance(message,DisconnectMessage):
         return {
@@ -358,7 +363,7 @@ def dict_to_message(data:dict):
             message_type=message_type,
             result_code=data["result_code"],
             result_message=data["result_message"],
-            signature=data["signature"]
+            signature=decode_bytes(data["signature"])
         )
     if message_type == MessageType.AUTH_REQ:
         return AuthenticationRequestMessage(
@@ -378,7 +383,7 @@ def dict_to_message(data:dict):
     if message_type == MessageType.AUTH_RES:
         return AuthenticationResultMessage(
             message_type=message_type,
-            encrypted_result=decode_bytes(data["encrypted_bytes"]),
+            encrypted_result=decode_bytes(data["encrypted_result"]),
             signature=decode_bytes(data["signature"])
             )
     if message_type == MessageType.MSG_SEND:
@@ -406,7 +411,7 @@ def dict_to_message(data:dict):
 
 
 
-def serialized_message(message) -> bytes:
+def serialize_message(message) -> bytes:
     message_dict= message_to_dict(message)
     json_text = json.dumps(message_dict,separators=(",",":"))
     return json_text.encode("utf-8")
@@ -414,7 +419,7 @@ def serialized_message(message) -> bytes:
 
 
 
-def deserialization_message(payload:bytes):
+def deserialize_message(payload:bytes):
     if payload is None:
         return None
     json_text = payload.decode("utf-8")
@@ -441,7 +446,7 @@ def recv_exact(sock,size:int):
         if not chunk:
             return None
         buffer+=chunk
-        return buffer
+    return buffer
 
 
 
@@ -1581,7 +1586,7 @@ class ServerTransportManager:
             if isinstance(data,(bytes,bytearray)):
                 payload = bytes(data)
             else:
-                payload = serialized_message(data)
+                payload = serialize_message(data)
 
             return send_framed(handle.socket_handle,payload)
 
@@ -1598,16 +1603,17 @@ class ServerTransportManager:
         if handle is None:
             return None
         try:
-            payload = recv_framed(handle.sock_handle)
+            payload = recv_framed(handle.socket_handle)
             if payload is None:
                 self.detect_client_disconnect(connection_id)
                 return None
+
+            return deserialize_message(payload)
         except Exception as error:
             self.transport_health_state.healthy = False
             self.transport_health_state.last_error = str(error)
             self.detect_client_disconnect(connection_id)
             return None
-        return data
 
 
 class ServerLifecycleManager:
@@ -2531,15 +2537,40 @@ def setup_server():
             server_session_manager)
 
 if __name__ == "__main__":
-    (server_transport_manager,
-     registration_service,
-     server_crypto_service,
-     enrollment_repository,
-     channel_key_manager,
-     authentication_service,
-     server_session_manager) = setup_server()
-    print("Server is configured.")
+    if __name__ == "__main__":
+        (
+            server_transport_manager,
+            registration_service,
+            server_crypto_service,
+            enrollment_repository,
+            channel_key_manager,
+            authentication_service,
+            server_session_manager
+        ) = setup_server()
 
+        lifecycle_manager = ServerLifecycleManager()
 
+        lifecycle_manager.initialize_runtime()
+        lifecycle_manager.bind_and_listen(5000, server_transport_manager)
+        lifecycle_manager.enter_running_state()
+
+        print("Server is listening on port 5000...")
+
+        while True:
+            client_socket, client_address = server_transport_manager.listening_socket.accept()
+            connection_id = f"{client_address[0]}:{client_address[1]}"
+            server_transport_manager.open_session(connection_id, client_socket, client_address)
+
+            print(f"Accepted connection: {connection_id}")
+
+            while connection_id in server_transport_manager.active_connection_handler_set:
+                packet = server_transport_manager.receive_client_packet(connection_id)
+                if packet is None:
+                    break
+
+                response = server_transport_manager.dispatch_incoming_packet(connection_id, packet)
+
+                if response is not None and hasattr(response, "message_type"):
+                    server_transport_manager.send_response_to_client(connection_id, response)
 
 

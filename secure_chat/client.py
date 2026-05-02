@@ -34,8 +34,8 @@ from server import (
     AuthenticationChallenge,
     AuthenticationResult,
     ChannelKeySet,
-    serialized_message,
-    deserialization_message,
+    serialize_message,
+    deserialize_message,
     send_framed,
     recv_framed
 
@@ -1086,7 +1086,7 @@ class ClientConnectionManager:
 
 
     def disconnect_from_server(self,disconnect_message=None):
-        if disconnect_message is None or None and self.active_socket_handle is not None:
+        if disconnect_message is not None and self.active_socket_handle is not None:
             try:
 
                 self.send_application_message(disconnect_message)
@@ -1177,7 +1177,7 @@ class ClientConnectionManager:
             return False
 
         try:
-            payload = serialized_message(message)
+            payload = serialize_message(message)
             return send_framed(self.active_socket_handle,payload)
         except Exception:
             self.connection_state = False
@@ -1204,7 +1204,7 @@ class ClientConnectionManager:
             if payload is None:
                 self.connection_state = False
                 return None
-            return deserialization_message(payload)
+            return deserialize_message(payload)
         except Exception:
             self.connection_state = False
             return None
