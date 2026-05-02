@@ -5,12 +5,16 @@ import secrets
 import socket
 import hashlib
 
+
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA3_512
 from Crypto.PublicKey import RSA
 
+#persistent store
+import sqlite3
+import threading
 
 
 #socket implementation imports
@@ -2407,18 +2411,78 @@ class ServerRuntimeContext:
 # 7. Persistence
 # =========================================
 class EnrollmentRepository:
-    def __init__(self):
-        self.enrollment_records = {}
-        self.persistent_store_handle=None
-    def save_enrollment_record(self,enrollment_records):
-        self.enrollment_records[enrollment_records.username] =enrollment_records
+    def __init__(self,db_path="secure_chat.db"):
+        self.db_path = db_path
+        self.db_lock = threading.Lock()
+        self.persistent_store_handle= sqlite3.connect(self.db_path,check_same_thread=False)
+        self.initialize_schema()
+
+    def initialize_schema(self):
+        with self.db_lock:
+            cursor = self.persistent_store_handle.cursor()
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS enrollments(
+                username TEXT PRIMARY KEY,
+                password_hash BLOB NOT NULL,
+                reversed_password_hash BLOB NOT NULL,
+                subscribed_channel TEXT NOT NULL)
+                """)
+            self.persistent_store_handle.commit()
+
+
+
+    def save_enrollment_record(self,enrollment_record):
+        with self.db_lock:
+            cursor = self.persistent_store_handle.cursor()
+            cursor.execute("""
+            INSERT INTO enrollments(
+            username,
+            password_hash,
+            reversed_password_hash,
+            subscribed_channel
+            )
+                VALUES(?,?,?,?)
+            """,(enrollment_record.username,
+                 enrollment_record.password_hash,
+                 enrollment_record.reversed_password_hash,
+                 enrollment_record.subscribed_channel.value
+
+            )
+
+            )
+            self.persistent_store_handle.commit()
+
 
 
     def retrieve_enrollment_record_by_username(self,username):
-        return self.enrollment_records.get(username)
+        with self.db_lock:
+            cursor = self.persistent_store_handle.cursor()
+            cursor.execute("""
+            SELECT username,password_hash,reversed_password_hash,subscribed_channel FROM enrollments WHERE username  = ?
+                           """,(username,))
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return EnrollmentRecord(
+            username= row[0],
+            password_hash=row[1],
+            reversed_password_hash=row[2],
+            subscribed_channel=ChannelName(row[3])
+        )
+    def close(self):
+        with self.db_lock:
+            self.persistent_store_handle.close()
+
 
     def check_whether_username_exists(self,username):
-        return username in self.enrollment_records
+        with self.db_lock:
+            cursor = self.persistent_store_handle.cursor()
+            cursor.execute("""
+            SELECT 1
+            FROM enrollments WHERE username = ?""",(username,))
+            row = cursor.fetchone()
+        return row is not None
+
 
 def setup_server():
     server_transport_manager = ServerTransportManager()
