@@ -1,6 +1,7 @@
 #client.py should be organized in this order
 
 import hmac
+import socket
 
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad, pad
@@ -33,6 +34,10 @@ from server import (
     AuthenticationChallenge,
     AuthenticationResult,
     ChannelKeySet,
+    serialize_message,
+    deserialize_message,
+    send_framed,
+    recv_framed
 
 )
 @dataclass
@@ -1065,11 +1070,29 @@ class ClientConnectionManager:
         self.remote_endpoint_info = None
         self.current_incoming_message = None
         self.current_outgoing_secure_packet = None
-    def connect_to_server(self,socket_handle):
-        self.active_socket_handle = socket_handle
-        self.connection_state = True
+    def connect_to_server(self,server_ip,server_port):
+        try:
+            sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+            sock.connect((server_ip,server_port))
+            self.active_socket_handle = sock
+            self.connection_state = True
+            self.remote_endpoint_info = (server_ip,server_port)
+            return True
+        except Exception:
+            self.active_socket_handle = None
+            self.connection_state = False
+            return False
+
+
 
     def disconnect_from_server(self,disconnect_message=None):
+        if disconnect_message is not None and self.active_socket_handle is not None:
+            try:
+
+                self.send_application_message(disconnect_message)
+            except Exception:
+                pass
+
         if self.active_socket_handle is not None:
             try:
                 self.active_socket_handle.close()
@@ -1078,7 +1101,7 @@ class ClientConnectionManager:
         self.active_socket_handle = None
         self.connection_state = False
 
-        #self.notify_disconnect()
+
 
     def send_registration_request(self,request_message):
         return self.send_application_message(request_message)
@@ -1146,16 +1169,48 @@ class ClientConnectionManager:
         self.connection_state = False
         self.active_socket_handle = None
     def send_application_message(self,message):
-        return message
+        if self.active_socket_handle is None:
+            return message
+        if not self.connection_state:
+            return False
+        if message is None:
+            return False
+
+        try:
+            payload = serialize_message(message)
+            return send_framed(self.active_socket_handle,payload)
+        except Exception:
+            self.connection_state = False
+            return False
+
+
+
+
+
 
     def receive_application_message(self):
+        if self.active_socket_handle is None:
+            if not self.connection_state:
+                return None
+            if self.current_incoming_message is None:
+                return None
+            message = self.current_incoming_message
+            self.current_incoming_message = None
+            return message
         if not self.connection_state:
             return None
-        if self.current_incoming_message is None:
+        try:
+            payload = recv_framed(self.active_socket_handle)
+            if payload is None:
+                self.connection_state = False
+                return None
+            return deserialize_message(payload)
+        except Exception:
+            self.connection_state = False
             return None
-        message = self.current_incoming_message
-        self.current_incoming_message = None
-        return message
+
+
+
 
     def detect_connection_loss(self):
         return not self.connection_state

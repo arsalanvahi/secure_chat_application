@@ -1,27 +1,29 @@
-#server.py should be organized in this order
+#server.py
+
 import hmac
 import secrets
 import socket
 import hashlib
 
 from Crypto.Cipher import AES
-
 from Crypto.Util.Padding import pad
-
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA3_512
 from Crypto.PublicKey import RSA
 
 
+
+#socket implementation imports
+import json
+import base64
+import struct
+
+
+# Shared / Common Data Structures /common Enums, Constants, Message types
+
 from enum import Enum
 from dataclasses import dataclass,field
 
-
-
-
-# =========================================
-# Shared / Common Data Structures /common Enums, Constants, Message types
-# =========================================
 class MessageType(str,Enum):
     REG_REQ = "REG_REQ"
     REG_RES ="REG_RES"
@@ -204,7 +206,7 @@ class AdminOperationalContext:
 
 
 @dataclass
-class ServerLifecycleState:
+class ServerLifecycleState:  #server_only
     lifecycle_phase: str
     startup_in_progress:bool=False
     shutdown_in_progress:bool=False
@@ -222,7 +224,7 @@ class LifecycleResult:
     running:bool=False
 
 @dataclass
-class MonitoringSnapshot:
+class MonitoringSnapshot: #server_only
     running:bool = False
     listening:bool=False
     connected_clients_count:int=0
@@ -231,18 +233,18 @@ class MonitoringSnapshot:
     transport_healthy:bool = True
 
 @dataclass
-class RuntimeStructureRegistry:
+class RuntimeStructureRegistry: #server_only
     structures:dict = field(default_factory = dict)
 
 @dataclass
-class RetryRecoveryState:
+class RetryRecoveryState: #sever_only
     retry_allowed:bool=False
     recovery_needed:bool=False
     partial_cleanup_required:bool=False
     last_recovery_error:str=""
 
 @dataclass
-class ChannelAvailabilityState:
+class ChannelAvailabilityState: #sever_only
     if100_available:bool=False
     math101_available:bool=False
     sps101_available:bool=False
@@ -251,7 +253,7 @@ class ChannelAvailabilityState:
 
 
 @dataclass
-class RelayContext:
+class RelayContext: #sever_only
     sender_connection_id: str
     sender_session_info:ServerSessionInfo | None
     secure_packet:SecureMessagePacket | None = None
@@ -265,7 +267,7 @@ class RelayContext:
 
 
 @dataclass
-class RelayResult:
+class RelayResult: #server_only
     success:bool
     message:str
     error: str
@@ -274,6 +276,134 @@ class RelayResult:
     recipient_count:int = 0
 
 
+#Shared Serialization/Fraiming Helpers
+def encode_bytes(value:bytes|None):
+    if value is None:
+        return None
+    return base64.b64encode(value).decode("utf_8")
+
+def decode_bytes(value:str|None):
+    if value is None:
+        return None
+    return base64.b64decode(value.encode("utf_8"))
+
+
+def message_to_dict(message):
+    if message is None:
+        return None
+    if isinstance(message,RegistrationRequestMessage):
+        return {
+            "message_type":message.message_type.value,
+            "encrypted_payload":encode_bytes(message.encrypted_payload)
+        }
+    if isinstance(message,RegistrationResponseMessage):
+        return {
+            "message_type":message.message_type.value,
+            "result_code":message.result_code,
+            "result_message":message.result_message,
+            "signature":encode_bytes(message.signature)
+            }
+    if isinstance(message,AuthenticationResultMessage):
+        return {
+            "message_type":message.message_type.value,
+            "encrypted_result":encode_bytes(message.encrypted_result),
+            "signature":encode_bytes(message.signature)
+            }
+    if isinstance(message,AuthenticationChallengeMessage):
+        return {
+            "message_type":message.message_type.value,
+            "challenge":encode_bytes(message.challenge)
+            }
+    if isinstance(message,AuthenticationResponseMessage):
+        return {
+            "message_type":message.message_type.value,
+            "hmac_response":encode_bytes(message.hmac_response)
+        }
+    if isinstance(message, AuthenticationRequestMessage):
+        return {
+            "message_type": message.message_type.value,
+            "username": message.username
+        }
+    if isinstance(message,SecureMessagePacket):
+        return {
+            "message_type":message.message_type.value,
+            "ciphertext":encode_bytes(message.ciphertext),
+            "hmac":encode_bytes(message.hmac)
+        }
+    if isinstance(message,DisconnectMessage):
+        return {
+            "message_type":message.message_type.value,
+            "reason":message.reason
+        }
+    if isinstance(message,ConnectionLostEvent):
+        return {
+            "message_type":message.message_type.value,
+            "reason":message.reason,
+            "details":message.details
+        }
+    raise ValueError(f"Unsupported message type for serialization:{type(message)}")
+
+
+
+
+
+def dict_to_message(data:dict):
+    if data is None:
+        return None
+    message_type = MessageType(data["message_type"])
+
+    if message_type == MessageType.REG_REQ:
+        return RegistrationRequestMessage(
+            message_type=message_type,
+            encrypted_payload=decode_bytes(data["encrypted_payload"])
+        )
+
+    if message_type == MessageType.REG_RES:
+        return RegistrationResponseMessage(
+            message_type=message_type,
+            result_code=data["result_code"],
+            result_message=data["result_message"],
+            signature=decode_bytes(data["signature"])
+        )
+    if message_type == MessageType.AUTH_REQ:
+        return AuthenticationRequestMessage(
+            message_type=message_type,
+            username=data["username"]
+        )
+    if message_type == MessageType.AUTH_CHALLENGE:
+        return AuthenticationChallengeMessage(
+            message_type=message_type,
+            challenge=decode_bytes(data["challenge"])
+        )
+    if message_type == MessageType.AUTH_RESP:
+        return AuthenticationResponseMessage(
+            message_type=message_type,
+            hmac_response=decode_bytes(data["hmac_response"])
+        )
+    if message_type == MessageType.AUTH_RES:
+        return AuthenticationResultMessage(
+            message_type=message_type,
+            encrypted_result=decode_bytes(data["encrypted_result"]),
+            signature=decode_bytes(data["signature"])
+            )
+    if message_type == MessageType.MSG_SEND:
+        return SecureMessagePacket(
+            message_type=message_type,
+            ciphertext=decode_bytes(data["ciphertext"]),
+            hmac=decode_bytes(data["hmac"])
+        )
+    if message_type == MessageType.DISCONNECT:
+        return DisconnectMessage(
+            message_type=message_type,
+            reason=data["reason"]
+        )
+    if message_type == MessageType.CONNECTION_LOST:
+        return ConnectionLostEvent(
+            message_type=message_type,
+            reason=data["reason"],
+            details=data.get("details","")
+        )
+    raise ValueError(f"Unsupported message type for deserialization:{message_type}")
 
 
 
@@ -281,9 +411,54 @@ class RelayResult:
 
 
 
+def serialize_message(message) -> bytes:
+    message_dict= message_to_dict(message)
+    json_text = json.dumps(message_dict,separators=(",",":"))
+    return json_text.encode("utf-8")
 
 
 
+
+def deserialize_message(payload:bytes):
+    if payload is None:
+        return None
+    json_text = payload.decode("utf-8")
+    message_dict = json.loads(json_text)
+    return dict_to_message(message_dict)
+
+
+
+
+
+def send_framed(sock,payload:bytes):
+    if payload is None:
+        return False
+    header = struct.pack("!I",len(payload))
+    sock.sendall(header+payload)
+    return True
+
+
+
+def recv_exact(sock,size:int):
+    buffer = b""
+    while len(buffer) < size:
+        chunk = sock.recv(size-len(buffer))
+        if not chunk:
+            return None
+        buffer+=chunk
+    return buffer
+
+
+
+def recv_framed(sock):
+    header = recv_exact(sock,4)
+    if header is None:
+        return None
+    payload_length = struct.unpack("!I",header)[0]
+    if payload_length <=0:
+        return None
+    payload = recv_exact(sock,payload_length)
+    return payload
 
 
 
@@ -1407,13 +1582,19 @@ class ServerTransportManager:
         if handle is None:
             return False
         try:
-            handle.socket_handle.sendall(data)
-            return True
+
+            if isinstance(data,(bytes,bytearray)):
+                payload = bytes(data)
+            else:
+                payload = serialize_message(data)
+
+            return send_framed(handle.socket_handle,payload)
+
         except Exception as error:
             self.transport_health_state.healthy = False
             self.transport_health_state.last_error = str(error)
             self.detect_client_disconnect(connection_id)
-            return False
+        return  False
 
 
 
@@ -1422,16 +1603,17 @@ class ServerTransportManager:
         if handle is None:
             return None
         try:
-            data = handle.socket_handle.recv(4096)
-            if not data:
+            payload = recv_framed(handle.socket_handle)
+            if payload is None:
                 self.detect_client_disconnect(connection_id)
                 return None
+
+            return deserialize_message(payload)
         except Exception as error:
             self.transport_health_state.healthy = False
             self.transport_health_state.last_error = str(error)
             self.detect_client_disconnect(connection_id)
             return None
-        return data
 
 
 class ServerLifecycleManager:
@@ -2355,15 +2537,40 @@ def setup_server():
             server_session_manager)
 
 if __name__ == "__main__":
-    (server_transport_manager,
-     registration_service,
-     server_crypto_service,
-     enrollment_repository,
-     channel_key_manager,
-     authentication_service,
-     server_session_manager) = setup_server()
-    print("Server is configured.")
+    if __name__ == "__main__":
+        (
+            server_transport_manager,
+            registration_service,
+            server_crypto_service,
+            enrollment_repository,
+            channel_key_manager,
+            authentication_service,
+            server_session_manager
+        ) = setup_server()
 
+        lifecycle_manager = ServerLifecycleManager()
 
+        lifecycle_manager.initialize_runtime()
+        lifecycle_manager.bind_and_listen(5000, server_transport_manager)
+        lifecycle_manager.enter_running_state()
+
+        print("Server is listening on port 5000...")
+
+        while True:
+            client_socket, client_address = server_transport_manager.listening_socket.accept()
+            connection_id = f"{client_address[0]}:{client_address[1]}"
+            server_transport_manager.open_session(connection_id, client_socket, client_address)
+
+            print(f"Accepted connection: {connection_id}")
+
+            while connection_id in server_transport_manager.active_connection_handler_set:
+                packet = server_transport_manager.receive_client_packet(connection_id)
+                if packet is None:
+                    break
+
+                response = server_transport_manager.dispatch_incoming_packet(connection_id, packet)
+
+                if response is not None and hasattr(response, "message_type"):
+                    server_transport_manager.send_response_to_client(connection_id, response)
 
 
