@@ -1,4 +1,6 @@
 #server.py
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -473,10 +475,348 @@ def recv_framed(sock):
 # 1. Server GUI / Presentation
 # =========================================
 
-# =========================================
-# 2. Monitoring
-# =========================================
+class ServerGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Chat Server")
+        self.root.geometry("800x650")
+        self.root.minsize(780, 600)
 
+        self.server_running = False
+        self.stop_event = threading.Event()
+        self.accept_thread = None
+        self.connection_threads = []
+
+        self.lifecycle_manager = ServerLifecycleManager()
+
+        self.server_transport_manager = None
+        self.registration_service = None
+        self.server_crypto_service = None
+        self.enrollment_repository = None
+        self.channel_key_manager = None
+        self.authentication_service = None
+        self.server_session_manager = None
+
+        self.build_ui()
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    # =====================================================
+    # UI BUILD
+    # =====================================================
+    def build_ui(self):
+        main = ttk.Frame(self.root, padding=10)
+        main.pack(fill="both", expand=True)
+
+        # -----------------------------
+        # Top bar
+        # -----------------------------
+        top_bar = ttk.Frame(main)
+        top_bar.pack(fill="x", pady=(0, 8))
+
+        ttk.Label(top_bar, text="Chat Server", font=("Arial", 11, "bold")).pack(side="left")
+
+        self.status_var = tk.StringVar(value="Status: disconnected")
+        ttk.Label(top_bar, textvariable=self.status_var).pack(side="right")
+
+        # =================================================
+        # Port section
+        # =================================================
+        port_frame = ttk.LabelFrame(main, text="Port", padding=12)
+        port_frame.pack(fill="x", pady=(0, 10))
+
+        ttk.Label(port_frame, text="Port").grid(row=0, column=0, sticky="w", padx=(0, 10))
+        self.port_var = tk.StringVar(value="5000")
+        ttk.Entry(port_frame, textvariable=self.port_var, width=20).grid(row=0, column=1)
+
+        # Toggle button
+        self.listen_button = ttk.Button(port_frame, text="Listen", command=self.toggle_server)
+        self.listen_button.grid(row=0, column=2, padx=(20, 0))
+
+        # =================================================
+        # Master key section
+        # =================================================
+        key_frame = ttk.LabelFrame(main, text="Master Key", padding=12)
+        key_frame.pack(fill="x", pady=(0, 10))
+
+        ttk.Label(key_frame, text="Master Key").grid(row=0, column=0, sticky="w", padx=(0, 10))
+        self.master_key_var = tk.StringVar()
+        ttk.Entry(key_frame, textvariable=self.master_key_var, width=30).grid(row=0, column=1, pady=(0, 10))
+
+        # Channel selection
+        channel_frame = ttk.Frame(key_frame)
+        channel_frame.grid(row=0, column=2, rowspan=2, padx=(30, 0), sticky="nw")
+
+        ttk.Label(channel_frame, text="Channel").pack(anchor="w")
+
+        self.channel_var = tk.StringVar(value=ChannelName.IF100.value)
+        ttk.Radiobutton(channel_frame, text="option 1  IF100",
+                        variable=self.channel_var, value=ChannelName.IF100.value).pack(anchor="w")
+        ttk.Radiobutton(channel_frame, text="option 2  MATH101",
+                        variable=self.channel_var, value=ChannelName.MATH101.value).pack(anchor="w")
+        ttk.Radiobutton(channel_frame, text="option 3  SPS101",
+                        variable=self.channel_var, value=ChannelName.SPS101.value).pack(anchor="w")
+
+        ttk.Button(key_frame, text="Generate", command=self.generate_keys).grid(
+            row=1, column=1, sticky="e", pady=(5, 0)
+        )
+
+        # =================================================
+        # Log tabs
+        # =================================================
+        log_frame = ttk.Frame(main)
+        log_frame.pack(fill="both", expand=True)
+
+        self.notebook = ttk.Notebook(log_frame)
+        self.notebook.pack(fill="both", expand=True)
+
+        self.log_boxes = {}
+        for channel in ChannelName:
+            tab = ttk.Frame(self.notebook)
+            self.notebook.add(tab, text=channel.value)
+
+            box = scrolledtext.ScrolledText(tab, wrap="word", state="disabled")
+            box.pack(fill="both", expand=True)
+
+            self.log_boxes[channel.value] = box
+
+    # =====================================================
+    # Helpers
+    # =====================================================
+    def log(self, text, channel=None):
+        if channel and channel in self.log_boxes:
+            box = self.log_boxes[channel]
+        else:
+            current_tab = self.notebook.tab(self.notebook.select(), "text")
+            box = self.log_boxes.get(current_tab)
+
+        if box:
+            box.configure(state="normal")
+            box.insert("end", text + "\n")
+            box.see("end")
+            box.configure(state="disabled")
+
+    def set_status(self, text):
+        self.status_var.set(f"Status: {text}")
+
+    def toggle_server(self):
+        if self.server_running:
+            self.stop_server()
+        else:
+            self.start_server()
+
+    # =====================================================
+    # Server control
+    # =====================================================
+    def start_server(self):
+        if self.server_running:
+            messagebox.showinfo("Server", "Server already running.")
+            return
+
+        try:
+            port = int(self.port_var.get().strip())
+        except ValueError:
+            messagebox.showerror("Input Error", "Invalid port.")
+            return
+
+        try:
+            (
+                self.server_transport_manager,
+                self.registration_service,
+                self.server_crypto_service,
+                self.enrollment_repository,
+                self.channel_key_manager,
+                self.authentication_service,
+                self.server_session_manager
+            ) = setup_server()
+
+            # Load RSA key pairs from PEM files
+            rsa_key_set = load_rsa_keyset_from_pem_files(
+                "server_enc_dec_pub_prv.pem",
+                "server_sign_verify_prv.pem"
+            )
+            self.server_crypto_service.load_rsa_keys(rsa_key_set)
+
+            if not self.server_crypto_service.validate_rsa_keys():
+                messagebox.showerror("Key Error", "Failed to load/validate RSA PEM files.")
+                return
+
+            self.lifecycle_manager.initialize_runtime()
+            bind_result = self.lifecycle_manager.bind_and_listen(port, self.server_transport_manager)
+            if not bind_result.success:
+                messagebox.showerror("Bind Error", bind_result.error)
+                return
+
+            self.lifecycle_manager.enter_running_state()
+
+            if self.server_transport_manager.listening_socket is not None:
+                self.server_transport_manager.listening_socket.settimeout(0.5)
+
+            self.stop_event.clear()
+            self.accept_thread = threading.Thread(target=self.accept_loop, daemon=True)
+            self.accept_thread.start()
+
+            self.server_running = True
+            self.listen_button.config(text="Listening")
+            self.set_status("connected")
+            self.log(f"Server listening on port {port}")
+
+        except Exception as error:
+            messagebox.showerror("Start Error", str(error))
+
+    def stop_server(self):
+        if not self.server_running:
+            self.set_status("disconnected")
+            self.listen_button.config(text="Listen")
+            return
+
+        self.stop_event.set()
+
+        try:
+            if self.server_transport_manager and self.server_transport_manager.listening_socket:
+                self.server_transport_manager.listening_socket.close()
+                self.server_transport_manager.listening_socket = None
+        except Exception:
+            pass
+
+        try:
+            if self.server_transport_manager is not None:
+                for connection_id in list(self.server_transport_manager.active_connection_handler_set.keys()):
+                    try:
+                        self.server_transport_manager.close_session(connection_id)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        if self.accept_thread is not None and self.accept_thread.is_alive():
+            self.accept_thread.join(timeout=1.5)
+
+        for worker in self.connection_threads:
+            if worker.is_alive():
+                worker.join(timeout=1.5)
+        self.connection_threads.clear()
+
+        try:
+            if self.server_session_manager is not None:
+                self.server_session_manager.clear_all_sessions()
+        except Exception:
+            pass
+
+        try:
+            if self.enrollment_repository is not None:
+                self.enrollment_repository.close()
+        except Exception:
+            pass
+
+        self.server_running = False
+        self.listen_button.config(text="Listen")
+        self.set_status("disconnected")
+        self.log("Server stopped")
+
+    def generate_keys(self):
+        if not self.server_running:
+            messagebox.showwarning("Server", "Start the server first.")
+            return
+
+        try:
+            channel = ChannelName(self.channel_var.get())
+            master_secret = self.master_key_var.get().strip()
+
+            if master_secret == "":
+                messagebox.showerror("Input Error", "Master key cannot be empty.")
+                return
+
+            key_set = self.channel_key_manager.generate_channel_keys(
+                channel,
+                master_secret,
+                self.server_crypto_service
+            )
+
+            if key_set:
+                self.log(f"Generated keys for channel {channel.value}", channel.value)
+                messagebox.showinfo("Keys", f"Keys generated for {channel.value}")
+            else:
+                messagebox.showerror("Keys", "Key generation failed.")
+
+        except Exception as error:
+            messagebox.showerror("Key Error", str(error))
+
+    # =====================================================
+    # Accept loop
+    # =====================================================
+    def accept_loop(self):
+        while not self.stop_event.is_set():
+            try:
+                sock, addr = self.server_transport_manager.listening_socket.accept()
+            except (socket.timeout, OSError):
+                continue
+
+            connection_id = f"{addr[0]}:{addr[1]}"
+            self.server_transport_manager.open_session(connection_id, sock, addr)
+
+            self.server_session_manager.active_connections[connection_id] = ServerSessionInfo(
+                connection_id=connection_id,
+                username=None,
+                authenticated=False,
+                channel=None
+            )
+
+            self.log(f"Accepted connection {connection_id}")
+
+            worker = threading.Thread(
+                target=self.connection_loop,
+                args=(connection_id,),
+                daemon=True
+            )
+            worker.start()
+            self.connection_threads.append(worker)
+
+    # =====================================================
+    # Per-client loop
+    # =====================================================
+    def connection_loop(self, connection_id):
+        while not self.stop_event.is_set():
+            if connection_id not in self.server_transport_manager.active_connection_handler_set:
+                break
+
+            packet = self.server_transport_manager.receive_client_packet(connection_id)
+            if packet is None:
+                break
+
+            self.log(f"Received from {connection_id}: {packet}")
+
+            if getattr(packet, "message_type", None) == MessageType.MSG_SEND:
+                session_info = self.server_session_manager.get_session_by_identifier(connection_id)
+                if session_info and session_info.channel is not None:
+                    self.log(f"Relayed message from {connection_id}", session_info.channel.value)
+
+            response = self.server_transport_manager.dispatch_incoming_packet(connection_id, packet)
+
+            if response is not None and hasattr(response, "message_type"):
+                self.server_transport_manager.send_response_to_client(connection_id, response)
+
+        try:
+            self.server_session_manager.remove_connections(connection_id)
+        except Exception:
+            pass
+
+        try:
+            self.server_transport_manager.close_session(connection_id)
+        except Exception:
+            pass
+
+        self.log(f"Closed connection: {connection_id}")
+
+    # =====================================================
+    # Shutdown
+    # =====================================================
+    def on_close(self):
+        try:
+            self.stop_server()
+        except Exception:
+            pass
+
+        self.root.destroy()
 
 
 # =========================================
@@ -2660,91 +3000,6 @@ def setup_server():
             server_session_manager)
 
 if __name__ == "__main__":
-    (
-        server_transport_manager,
-        registration_service,
-        server_crypto_service,
-        enrollment_repository,
-        channel_key_manager,
-        authentication_service,
-        server_session_manager
-    ) = setup_server()
-
-    # Load RSA key pairs from PEM files
-    rsa_key_set = load_rsa_keyset_from_pem_files(
-        "server_enc_dec_pub_prv.pem",
-        "server_sign_verify_prv.pem"
-    )
-    server_crypto_service.load_rsa_keys(rsa_key_set)
-
-    if not server_crypto_service.validate_rsa_keys():
-        raise RuntimeError("Failed to load/validate RSA PEM files.")
-
-    print("RSA keys valid:", server_crypto_service.validate_rsa_keys())
-
-    # Generate test channel keys so authentication can return SUCCESS
-    test_master_secret = "if100_master_secret_demo"
-    generated_key_set = channel_key_manager.generate_channel_keys(
-        ChannelName.IF100,
-        test_master_secret,
-        server_crypto_service
-    )
-    print("IF100 channel keys generated:", generated_key_set is not None)
-
-    lifecycle_manager = ServerLifecycleManager()
-
-    init_result = lifecycle_manager.initialize_runtime()
-    print("Init result:", init_result)
-
-    bind_result = lifecycle_manager.bind_and_listen(5000, server_transport_manager)
-    print("Bind result:", bind_result)
-
-    if not bind_result.success:
-        raise RuntimeError(f"Bind/listen failed: {bind_result.error}")
-
-    run_result = lifecycle_manager.enter_running_state()
-    print("Run result:", run_result)
-
-    print("Server is listening on port 5000...")
-
-    while True:
-        client_socket, client_address = server_transport_manager.listening_socket.accept()
-        connection_id = f"{client_address[0]}:{client_address[1]}"
-        server_transport_manager.open_session(connection_id, client_socket, client_address)
-
-        # pre-register transport-side session placeholder
-        server_session_manager.active_connections[connection_id] = ServerSessionInfo(
-            connection_id=connection_id,
-            username=None,
-            authenticated=False,
-            channel=None
-        )
-
-        print(f"Accepted connection: {connection_id}")
-
-        while connection_id in server_transport_manager.active_connection_handler_set:
-            packet = server_transport_manager.receive_client_packet(connection_id)
-            if packet is None:
-                break
-
-            print("SERVER received packet:", packet)
-
-            response = server_transport_manager.dispatch_incoming_packet(connection_id, packet)
-
-            print("SERVER dispatch response:", response)
-
-            if response is not None and hasattr(response, "message_type"):
-                server_transport_manager.send_response_to_client(connection_id, response)
-
-        # final cleanup after disconnect / connection loss
-        try:
-            server_session_manager.remove_connections(connection_id)
-        except Exception:
-            pass
-
-        try:
-            server_transport_manager.close_session(connection_id)
-        except Exception:
-            pass
-
-        print(f"Closed connection: {connection_id}")
+    root = tk.Tk()
+    ServerGUI(root)
+    root.mainloop()
