@@ -1,4 +1,7 @@
 #server.py
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 
 import hmac
 import secrets
@@ -6,7 +9,7 @@ import socket
 import hashlib
 
 
-from Crypto.Cipher import AES
+from Crypto.Cipher import AES,PKCS1_OAEP
 from Crypto.Util.Padding import pad
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA3_512
@@ -2072,25 +2075,41 @@ class ServerCryptoService:
         self.crypto_readiness_status = True
         return True
 
-
-
-    def decrypt_registration_payload(self,encrypted_registration_payload):
-        payload_text = encrypted_registration_payload.decode("utf-8")
-        parts = payload_text.split("|")
-        if len(parts) != 4:
+    def decrypt_registration_payload(self, encrypted_registration_payload):
+        if encrypted_registration_payload is None:
             return None
-        username = parts[0]
-        password_hash = bytes.fromhex(parts[1])
-        reversed_password_hash = bytes.fromhex(parts[2])
-        selected_channel = ChannelName(parts[3])
 
-        payload = RegistrationPayload(
-            username=username,
-            password_hash=password_hash,
-            reversed_password_hash=reversed_password_hash,
-            selected_channel=selected_channel
-        )
-        return payload
+        if self.loaded_rsa_encryption_key_pair is None:
+            return None
+
+        try:
+            private_key_bytes = self.loaded_rsa_encryption_key_pair["decryption_private_key"]
+            private_key = RSA.import_key(private_key_bytes)
+            cipher_rsa = PKCS1_OAEP.new(private_key)
+
+            payload_text = cipher_rsa.decrypt(encrypted_registration_payload).decode("utf-8")
+            parts = payload_text.split("|")
+
+            if len(parts) != 4:
+                return None
+
+            username = parts[0]
+            password_hash = bytes.fromhex(parts[1])
+            reversed_password_hash = bytes.fromhex(parts[2])
+            selected_channel = ChannelName(parts[3])
+
+            return RegistrationPayload(
+                username=username,
+                password_hash=password_hash,
+                reversed_password_hash=reversed_password_hash,
+                selected_channel=selected_channel
+            )
+
+        except Exception:
+            return None
+
+
+
 
 
     def generate_secure_challenge(self):
@@ -2483,6 +2502,29 @@ class EnrollmentRepository:
             row = cursor.fetchone()
         return row is not None
 
+def load_rsa_keyset_from_pem_files(
+    enc_pair_filename="server_enc_dec_pub_prv.pem",
+    sign_pair_filename="server_sign_verify_prv.pem"
+):
+    enc_pair_path = BASE_DIR / enc_pair_filename
+    sign_pair_path = BASE_DIR / sign_pair_filename
+
+    enc_pair_bytes = enc_pair_path.read_bytes()
+    sign_pair_bytes = sign_pair_path.read_bytes()
+
+    enc_private_key = RSA.import_key(enc_pair_bytes)
+    sign_private_key = RSA.import_key(sign_pair_bytes)
+
+    return RsaKeySet(
+        encryption_public_key=enc_private_key.publickey().export_key(),
+        decryption_private_key=enc_private_key.export_key(),
+        signing_private_key=sign_private_key.export_key(),
+        verification_public_key=sign_private_key.publickey().export_key(),
+        validity_status=True
+    )
+
+
+
 
 def setup_server():
     server_transport_manager = ServerTransportManager()
@@ -2628,11 +2670,40 @@ if __name__ == "__main__":
         server_session_manager
     ) = setup_server()
 
+    # Load RSA key pairs from PEM files
+    rsa_key_set = load_rsa_keyset_from_pem_files(
+        "server_enc_dec_pub_prv.pem",
+        "server_sign_verify_prv.pem"
+    )
+    server_crypto_service.load_rsa_keys(rsa_key_set)
+
+    if not server_crypto_service.validate_rsa_keys():
+        raise RuntimeError("Failed to load/validate RSA PEM files.")
+
+    print("RSA keys valid:", server_crypto_service.validate_rsa_keys())
+
+    # Generate test channel keys so authentication can return SUCCESS
+    test_master_secret = "if100_master_secret_demo"
+    generated_key_set = channel_key_manager.generate_channel_keys(
+        ChannelName.IF100,
+        test_master_secret,
+        server_crypto_service
+    )
+    print("IF100 channel keys generated:", generated_key_set is not None)
+
     lifecycle_manager = ServerLifecycleManager()
 
-    lifecycle_manager.initialize_runtime()
-    lifecycle_manager.bind_and_listen(5000, server_transport_manager)
-    lifecycle_manager.enter_running_state()
+    init_result = lifecycle_manager.initialize_runtime()
+    print("Init result:", init_result)
+
+    bind_result = lifecycle_manager.bind_and_listen(5000, server_transport_manager)
+    print("Bind result:", bind_result)
+
+    if not bind_result.success:
+        raise RuntimeError(f"Bind/listen failed: {bind_result.error}")
+
+    run_result = lifecycle_manager.enter_running_state()
+    print("Run result:", run_result)
 
     print("Server is listening on port 5000...")
 
@@ -2656,7 +2727,11 @@ if __name__ == "__main__":
             if packet is None:
                 break
 
+            print("SERVER received packet:", packet)
+
             response = server_transport_manager.dispatch_incoming_packet(connection_id, packet)
+
+            print("SERVER dispatch response:", response)
 
             if response is not None and hasattr(response, "message_type"):
                 server_transport_manager.send_response_to_client(connection_id, response)

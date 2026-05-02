@@ -1,9 +1,12 @@
 #client.py should be organized in this order
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 
 import hmac
 import socket
 
-from Crypto.Cipher import AES
+from Crypto.Cipher import AES,PKCS1_OAEP
 from Crypto.Util.Padding import unpad, pad
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA3_512
@@ -1170,9 +1173,10 @@ class ClientConnectionManager:
     def close_session(self):
         self.connection_state = False
         self.active_socket_handle = None
-    def send_application_message(self,message):
+
+    def send_application_message(self, message):
         if self.active_socket_handle is None:
-            return message
+            return False
         if not self.connection_state:
             return False
         if message is None:
@@ -1180,7 +1184,7 @@ class ClientConnectionManager:
 
         try:
             payload = serialize_message(message)
-            return send_framed(self.active_socket_handle,payload)
+            return send_framed(self.active_socket_handle, payload)
         except Exception:
             self.connection_state = False
             return False
@@ -1229,10 +1233,29 @@ class ClientCryptoService:
         self.server_encryption_public_keys = None
         self.server_signature_verification_public_keys = None
         self.crypto_readiness_status = False
-    def load_server_public_keys(self,public_key_set):
-        self.server_encryption_public_keys = public_key_set
-        self.server_signature_verification_public_keys = public_key_set
+
+    def load_server_public_keys_from_files(
+            self,
+            enc_pub_filename="server_enc_dec_pub.pem",
+            sign_pub_filename="server_sign_verify_pub.pem"
+    ):
+        enc_pub_path = BASE_DIR / enc_pub_filename
+        sign_pub_path = BASE_DIR / sign_pub_filename
+
+        encryption_public_key_bytes = enc_pub_path.read_bytes()
+        signature_public_key_bytes = sign_pub_path.read_bytes()
+
+        self.load_server_public_keys(
+            encryption_public_key_bytes,
+            signature_public_key_bytes
+        )
+
+    def load_server_public_keys(self, encryption_public_key_bytes, signature_public_key_bytes):
+        self.server_encryption_public_keys = encryption_public_key_bytes
+        self.server_signature_verification_public_keys = signature_public_key_bytes
         self.crypto_readiness_status = True
+
+
     def derive_enrollment_values_from_password(self,password):
         password_bytes = password.encode("utf-8")
         reversed_password_bytes = password[::-1].encode("utf-8")
@@ -1262,22 +1285,33 @@ class ClientCryptoService:
             "response_decryption_iv":response_decryption_iv,
         }
 
-    def encrypt_registration_request(self,registration_payload):
+    def encrypt_registration_request(self, registration_payload):
+        if registration_payload is None:
+            return None
+        if self.server_encryption_public_keys is None:
+            return None
+
         selected_channel = registration_payload.selected_channel
-        if hasattr(selected_channel,"value"):
+        if hasattr(selected_channel, "value"):
             selected_channel = selected_channel.value
 
-        payload_text=(
-            registration_payload.username
-            + "|"
-            + registration_payload.password_hash.hex()
-            + "|"
-            + registration_payload.reversed_password_hash.hex()
-            + "|"
-            + selected_channel
+        payload_text = (
+                registration_payload.username
+                + "|"
+                + registration_payload.password_hash.hex()
+                + "|"
+                + registration_payload.reversed_password_hash.hex()
+                + "|"
+                + selected_channel
         )
 
-        return payload_text.encode("utf-8")
+        try:
+            public_key = RSA.import_key(self.server_encryption_public_keys)
+            cipher_rsa = PKCS1_OAEP.new(public_key)
+            return cipher_rsa.encrypt(payload_text.encode("utf-8"))
+        except Exception:
+            return None
+
     def encrypt_secure_message(self,message,aes_key,iv):
         if message is None:
             return None
@@ -1536,3 +1570,185 @@ class ChannelKeyStore:
         self.keys_loaded = False
 
 
+if __name__ == "__main__":
+    import time
+
+    app = ClientAppCoordinator()
+
+    # Load server public PEM files
+    app.client_crypto_service.load_server_public_keys_from_files(
+        "server_enc_dec_pub.pem",
+        "server_sign_verify_pub.pem"
+    )
+
+    print("Client PEM keys loaded:", app.client_crypto_service.crypto_readiness_status)
+
+    server_ip = "127.0.0.1"
+    server_port = 5000
+
+    # Use unique username every run
+    username = f"testuser_{int(time.time())}"
+    password = "testpassword123"
+    selected_channel = ChannelName.IF100
+
+    # -------------------------------------------------
+    # CONNECT
+    # -------------------------------------------------
+    connected = app.client_connection_manager.connect_to_server(server_ip, server_port)
+    if not connected:
+        print("Failed to connect to server.")
+        raise SystemExit(1)
+
+    app.client_session_manager.set_connection_state(True)
+    print("Connected to server.")
+
+    # -------------------------------------------------
+    # REGISTRATION
+    # -------------------------------------------------
+    app.registration_controller.start_registration(
+        server_ip=server_ip,
+        server_port=server_port,
+        username=username,
+        password=password,
+        selected_channel=selected_channel
+    )
+
+    valid = app.registration_controller.validate_registration_input()
+    if not valid:
+        print("Registration input invalid:", app.registration_controller.last_registration_error)
+        raise SystemExit(1)
+
+    request_message = app.registration_controller.submit_registration_request(
+        app.client_crypto_service,
+        app.client_connection_manager
+    )
+
+    if request_message is None:
+        print("Failed to create/send REG_REQ.")
+        raise SystemExit(1)
+
+    print("REG_REQ sent. Waiting for REG_RES...")
+
+    response_message = app.client_connection_manager.receive_application_message()
+
+    if response_message is None:
+        print("No REG_RES received from server.")
+        raise SystemExit(1)
+
+    print("Received REG_RES:", response_message)
+
+    handled = app.registration_controller.handle_registration_response(response_message)
+    print("REG_RES handled:", handled)
+    print("Registration result:", app.registration_controller.last_registration_result)
+    print("Registration error:", app.registration_controller.last_registration_error)
+
+    if not handled:
+        raise SystemExit(1)
+
+    completed_registration = app.registration_controller.complete_registration()
+    print("Registration completed:", completed_registration)
+
+    # -------------------------------------------------
+    # AUTHENTICATION
+    # -------------------------------------------------
+    app.authentication_controller.start_authentication(username, password)
+
+    valid_auth = app.authentication_controller.validate_authentication_input()
+    if not valid_auth:
+        print("Authentication input invalid:", app.authentication_controller.last_authentication_error)
+        raise SystemExit(1)
+
+    auth_request = app.authentication_controller.request_authentication()
+    if auth_request is None:
+        print("Failed to create AUTH_REQ.")
+        raise SystemExit(1)
+
+    sent_req = app.client_connection_manager.send_authentication_request(auth_request)
+    if not sent_req:
+        print("Failed to send AUTH_REQ.")
+        raise SystemExit(1)
+
+    print("AUTH_REQ sent. Waiting for AUTH_CHALLENGE...")
+
+    challenge_message = app.client_connection_manager.receive_application_message()
+    if challenge_message is None:
+        print("No AUTH_CHALLENGE received.")
+        raise SystemExit(1)
+
+    print("Received AUTH_CHALLENGE:", challenge_message)
+
+    auth_response = app.authentication_controller.handle_authentication_challenge(
+        challenge_message,
+        app.client_crypto_service
+    )
+    if auth_response is None:
+        print("Failed to create AUTH_RESP:", app.authentication_controller.last_authentication_error)
+        raise SystemExit(1)
+
+    sent_resp = app.client_connection_manager.send_authentication_response(auth_response)
+    if not sent_resp:
+        print("Failed to send AUTH_RESP.")
+        raise SystemExit(1)
+
+    print("AUTH_RESP sent. Waiting for AUTH_RES...")
+
+    auth_result_message = app.client_connection_manager.receive_application_message()
+    if auth_result_message is None:
+        print("No AUTH_RES received.")
+        raise SystemExit(1)
+
+    print("Received AUTH_RES:", auth_result_message)
+
+    handled_auth = app.authentication_controller.handle_authentication_result(
+        auth_result_message,
+        app.client_crypto_service
+    )
+
+    print("AUTH_RES handled:", handled_auth)
+    print("Authentication result:", app.authentication_controller.last_authentication_result)
+    print("Authentication error:", app.authentication_controller.last_authentication_error)
+
+    if not handled_auth:
+        raise SystemExit(1)
+
+    completed_auth = app.authentication_controller.complete_authentication()
+    print("Authentication completed:", completed_auth)
+
+    # -------------------------------------------------
+    # OPTIONAL SECURE MESSAGE TEST
+    # -------------------------------------------------
+    if completed_auth:
+        app.secure_message_sender.current_outgoing_plaintext = "Hello secure channel!"
+
+        ready = app.secure_message_sender.validate_send_readiness(app.client_session_manager)
+        print("Send readiness:", ready)
+
+        if ready:
+            prepared_plaintext = app.secure_message_sender.prepare_outgoing_plaintext()
+            secure_packet = app.secure_message_sender.secure_packet(
+                prepared_plaintext,
+                app.client_crypto_service
+            )
+
+            print("Prepared secure packet:", secure_packet)
+
+            if secure_packet is not None:
+                send_result = app.secure_message_sender.send_secure_message(
+                    app.client_connection_manager
+                )
+                print("Secure message send result:", send_result)
+
+                # Optional: try receiving broadcast back if server relays to sender
+                incoming = app.client_connection_manager.receive_application_message()
+                print("Optional incoming packet after send:", incoming)
+
+                if incoming is not None and incoming.message_type == MessageType.MSG_SEND:
+                    receive_result = app.incoming_message_processor.handle_incoming_packet(incoming)
+                    print("Incoming message handled:", receive_result)
+                    print("Recovered plaintext:", app.incoming_message_processor.current_recovered_plaintext)
+
+    # -------------------------------------------------
+    # CLEANUP
+    # -------------------------------------------------
+    app.client_connection_manager.disconnect_from_server()
+    print("Disconnected.")
