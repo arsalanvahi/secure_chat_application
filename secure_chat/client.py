@@ -1042,7 +1042,11 @@ class DisconnectController:
         self.last_disconnect_result = "In-progress operations aborted"
         return True
     def close_active_connections(self,client_connection_manager):
-        client_connection_manager.disconnect_from_server()
+        disconnect_message = DisconnectMessage(
+            message_type=MessageType.DISCONNECT,
+            reason="client requested disconnect"
+            )
+        client_connection_manager.disconnect_from_server(disconnect_message)
         return True
 
     def clear_local_session_state(self,client_session_manager):

@@ -2519,11 +2519,28 @@ def setup_server():
 
         return relay_result
     ################################################################
+    def handle_disconnect_packet(connection_id, packet):
+        print(f"Disconnect requested from {connection_id}: {packet.reason if packet else 'No reason'}")
+
+        try:
+            server_session_manager.remove_connections(connection_id)
+        except Exception:
+            pass
+
+        try:
+            server_transport_manager.close_session(connection_id)
+        except Exception:
+            pass
+
+        return None
+    #####################################################################
+
     server_transport_manager.register_transport_handlers({
         MessageType.REG_REQ: handle_registration_packet,
         MessageType.AUTH_REQ:handle_authentication_request_packet,
         MessageType.AUTH_RESP:handle_authentication_response_packet,
-        MessageType.MSG_SEND:handle_secure_message_packet
+        MessageType.MSG_SEND:handle_secure_message_packet,
+        MessageType.DISCONNECT:handle_disconnect_packet
 
 
     })
@@ -2537,40 +2554,58 @@ def setup_server():
             server_session_manager)
 
 if __name__ == "__main__":
-    if __name__ == "__main__":
-        (
-            server_transport_manager,
-            registration_service,
-            server_crypto_service,
-            enrollment_repository,
-            channel_key_manager,
-            authentication_service,
-            server_session_manager
-        ) = setup_server()
+    (
+        server_transport_manager,
+        registration_service,
+        server_crypto_service,
+        enrollment_repository,
+        channel_key_manager,
+        authentication_service,
+        server_session_manager
+    ) = setup_server()
 
-        lifecycle_manager = ServerLifecycleManager()
+    lifecycle_manager = ServerLifecycleManager()
 
-        lifecycle_manager.initialize_runtime()
-        lifecycle_manager.bind_and_listen(5000, server_transport_manager)
-        lifecycle_manager.enter_running_state()
+    lifecycle_manager.initialize_runtime()
+    lifecycle_manager.bind_and_listen(5000, server_transport_manager)
+    lifecycle_manager.enter_running_state()
 
-        print("Server is listening on port 5000...")
+    print("Server is listening on port 5000...")
 
-        while True:
-            client_socket, client_address = server_transport_manager.listening_socket.accept()
-            connection_id = f"{client_address[0]}:{client_address[1]}"
-            server_transport_manager.open_session(connection_id, client_socket, client_address)
+    while True:
+        client_socket, client_address = server_transport_manager.listening_socket.accept()
+        connection_id = f"{client_address[0]}:{client_address[1]}"
+        server_transport_manager.open_session(connection_id, client_socket, client_address)
 
-            print(f"Accepted connection: {connection_id}")
+        # pre-register transport-side session placeholder
+        server_session_manager.active_connections[connection_id] = ServerSessionInfo(
+            connection_id=connection_id,
+            username=None,
+            authenticated=False,
+            channel=None
+        )
 
-            while connection_id in server_transport_manager.active_connection_handler_set:
-                packet = server_transport_manager.receive_client_packet(connection_id)
-                if packet is None:
-                    break
+        print(f"Accepted connection: {connection_id}")
 
-                response = server_transport_manager.dispatch_incoming_packet(connection_id, packet)
+        while connection_id in server_transport_manager.active_connection_handler_set:
+            packet = server_transport_manager.receive_client_packet(connection_id)
+            if packet is None:
+                break
 
-                if response is not None and hasattr(response, "message_type"):
-                    server_transport_manager.send_response_to_client(connection_id, response)
+            response = server_transport_manager.dispatch_incoming_packet(connection_id, packet)
 
+            if response is not None and hasattr(response, "message_type"):
+                server_transport_manager.send_response_to_client(connection_id, response)
 
+        # final cleanup after disconnect / connection loss
+        try:
+            server_session_manager.remove_connections(connection_id)
+        except Exception:
+            pass
+
+        try:
+            server_transport_manager.close_session(connection_id)
+        except Exception:
+            pass
+
+        print(f"Closed connection: {connection_id}")
