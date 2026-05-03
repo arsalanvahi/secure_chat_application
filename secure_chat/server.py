@@ -656,7 +656,7 @@ class ServerGUI:
             self.accept_thread.start()
 
             self.server_running = True
-            self.listen_button.config(text="Listening")
+            self.listen_button.config(text="Stop")
             self.set_status("connected")
             self.log(f"Server listening on port {port}")
 
