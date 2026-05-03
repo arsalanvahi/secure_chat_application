@@ -1082,7 +1082,7 @@ class AuthenticationController:
             self.authentication_in_progress = False
             return False
         if self.last_authentication_result.status != AuthStatus.SUCCESS:
-            self.last_authentication_error = "Authentication has not completed successfully"
+            self.last_authentication_error = "Authentication has not completed successfully (Missing Channel Keys"
             self.authentication_in_progress = False
             return False
         self.pending_authentication_input = None
@@ -1102,7 +1102,7 @@ class AuthenticationController:
             return False
 
         if self.last_authentication_result.status == AuthStatus.SUCCESS:
-            self.last_authentication_error = "Authentication error is not allowed after succes"
+            self.last_authentication_error = "Authentication error is not allowed after success"
             self.authentication_in_progress = False
             return False
         self.authentication_in_progress = True
