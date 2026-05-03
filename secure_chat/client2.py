@@ -1,6 +1,6 @@
 #client.py should be organized in this order
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext,filedialog
 
 from pathlib import Path
 
@@ -8,6 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 import hmac
 import socket
+
 
 from Crypto.Cipher import AES,PKCS1_OAEP
 from Crypto.Util.Padding import unpad, pad
@@ -103,22 +104,26 @@ class ClientGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Chat Client")
-        self.root.title("Chat Client")
         self.root.geometry("850x820")
+        self.root.minsize(820, 700)
 
         self.app = ClientAppCoordinator()
 
-        # Load server public PEM files
-        try:
-            self.app.client_crypto_service.load_server_public_keys_from_files(
-                "server_enc_dec_pub.pem",
-                "server_sign_verify_pub.pem"
-            )
-        except Exception as error:
-            messagebox.showerror(
-                "Key Load Error",
-                f"Failed to load server public key files:\n{error}"
-            )
+        # Load server public PEM files from code
+        #try:
+        #    self.app.client_crypto_service.load_server_public_keys_from_files(
+        #        "server_enc_dec_pub.pem",
+        #        "server_sign_verify_pub.pem"
+        #    )
+        #except Exception as error:
+        #    messagebox.showerror(
+        #       "Key Load Error",
+        #       f"Failed to load server public key files:\n{error}"
+        #    )
+
+        #load from GUI
+        self.enc_pub_path_var = tk.StringVar(value=str(BASE_DIR / "server_enc_dec_pub.pem"))
+        self.sign_pub_path_var = tk.StringVar(value=str(BASE_DIR / "server_sign_verify_pub.pem"))
 
         self.polling_active = False
 
@@ -142,6 +147,24 @@ class ClientGUI:
 
         self.status_var = tk.StringVar(value="Status: disconnected / not logged in")
         ttk.Label(top_bar, textvariable=self.status_var).pack(side="right")
+
+        # =================================================
+        # Server Public Keys
+        # =================================================
+        keys_frame = ttk.LabelFrame(main, text="Server Public Keys", padding=12)
+        keys_frame.pack(fill="x", pady=(0, 10))
+
+        ttk.Label(keys_frame, text="Encryption Key").grid(row=0, column=0, sticky="w", padx=(0, 10), pady=4)
+        ttk.Entry(keys_frame, textvariable=self.enc_pub_path_var, width=55).grid(row=0, column=1, sticky="ew", pady=4)
+        ttk.Button(keys_frame, text="Browse", command=self.browse_enc_pub_key).grid(row=0, column=2, padx=(8, 0),
+                                                                                    pady=4)
+
+        ttk.Label(keys_frame, text="Signature Key").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=4)
+        ttk.Entry(keys_frame, textvariable=self.sign_pub_path_var, width=55).grid(row=1, column=1, sticky="ew", pady=4)
+        ttk.Button(keys_frame, text="Browse", command=self.browse_sign_pub_key).grid(row=1, column=2, padx=(8, 0),
+                                                                                     pady=4)
+
+        keys_frame.columnconfigure(1, weight=1)
 
         # =================================================
         # Enrollment Section
@@ -176,21 +199,21 @@ class ClientGUI:
         self.channel_var = tk.StringVar(value=ChannelName.IF100.value)
         ttk.Radiobutton(
             enroll_right,
-            text="option 1  IF100",
+            text="IF100",
             variable=self.channel_var,
             value=ChannelName.IF100.value
         ).grid(row=1, column=0, sticky="w", pady=2)
 
         ttk.Radiobutton(
             enroll_right,
-            text="option 2  MATH101",
+            text="MATH101",
             variable=self.channel_var,
             value=ChannelName.MATH101.value
         ).grid(row=2, column=0, sticky="w", pady=2)
 
         ttk.Radiobutton(
             enroll_right,
-            text="option 3  SPS101",
+            text="SPS101",
             variable=self.channel_var,
             value=ChannelName.SPS101.value
         ).grid(row=3, column=0, sticky="w", pady=2)
@@ -230,35 +253,38 @@ class ClientGUI:
         login_frame.columnconfigure(1, weight=1)
         login_frame.rowconfigure(0, weight=1)
 
-        ttk.Label(chat_right, text="Incoming Messages").pack(anchor="w")
+        chat_right.columnconfigure(0, weight=1)
+        chat_right.rowconfigure(1, weight=1)
+
+        ttk.Label(chat_right, text="Incoming Messages").grid(row=0, column=0, sticky="w")
 
         self.incoming_box = scrolledtext.ScrolledText(
             chat_right,
             wrap="word",
-            height=18,
+            height=14,
             state="disabled"
         )
-        self.incoming_box.pack(fill="both", expand=True, pady=(5, 10))
+        self.incoming_box.grid(row=1, column=0, sticky="nsew", pady=(5, 10))
 
-        ttk.Label(chat_right, text="Message").pack(anchor="w", pady=(0, 4))
+        ttk.Label(chat_right, text="Message").grid(row=2, column=0, sticky="w", pady=(0, 4))
 
         msg_row = ttk.Frame(chat_right)
-        msg_row.pack(fill="x", pady=(0, 10))
+        msg_row.grid(row=3, column=0, sticky="ew", pady=(0, 10))
+        msg_row.columnconfigure(0, weight=1)
 
         self.message_var = tk.StringVar()
         self.message_entry = ttk.Entry(msg_row, textvariable=self.message_var)
-        self.message_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.message_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         self.message_entry.bind("<Return>", lambda event: self.send_message())
 
         self.send_button = ttk.Button(msg_row, text="Send", command=self.send_message)
-        self.send_button.pack(side="right")
+        self.send_button.grid(row=0, column=1)
 
         action_row = ttk.Frame(chat_right)
-        action_row.pack(fill="x")
+        action_row.grid(row=4, column=0, sticky="e")
 
-        ttk.Button(action_row, text="log out", command=self.log_out).pack(side="right", padx=(8, 0))
-        ttk.Button(action_row, text="Log in", command=self.log_in).pack(side="right")
-
+        ttk.Button(action_row, text="Log out", command=self.log_out).pack(side="right")
+        ttk.Button(action_row, text="log in", command=self.log_in).pack(side="right", padx=(8, 0))
     # =====================================================
     # Utility methods
     # =====================================================
@@ -296,6 +322,9 @@ class ClientGUI:
         except Exception:
             messagebox.showerror("Channel Error", "Invalid channel selection.")
             return
+        if not self.load_selected_server_public_keys():
+            return
+
 
         try:
             # Connect if needed
@@ -335,7 +364,10 @@ class ClientGUI:
                 messagebox.showerror("Registration Error", "No valid registration response received.")
                 return
 
-            handled = self.app.registration_controller.handle_registration_response(response_message)
+            handled = self.app.registration_controller.handle_registration_response(
+                response_message,
+                self.app.client_crypto_service
+            )
             if handled:
                 self.app.registration_controller.complete_registration()
                 self.append_message(f"[REGISTER] User '{username}' registered successfully.")
@@ -359,6 +391,8 @@ class ClientGUI:
 
         if not server_ip or server_port is None:
             messagebox.showerror("Input Error", "Please enter a valid IP and port.")
+            return
+        if not self.load_selected_server_public_keys():
             return
 
         try:
@@ -553,6 +587,40 @@ class ClientGUI:
             pass
         self.polling_active = False
         self.root.destroy()
+
+    def load_selected_server_public_keys(self):
+        enc_path = self.enc_pub_path_var.get().strip()
+        sign_path = self.sign_pub_path_var.get().strip()
+
+        if not enc_path or not sign_path:
+            messagebox.showerror("Key Error", "Please select both server public key files.")
+            return False
+
+        try:
+            self.app.client_crypto_service.load_server_public_keys_from_paths(
+                enc_path,
+                sign_path
+            )
+            return True
+        except Exception as error:
+            messagebox.showerror("Key Load Error", f"Failed to load server public keys:\n{error}")
+            return False
+
+    def browse_enc_pub_key(self):
+        path = filedialog.askopenfilename(
+            title="Select Server Encryption Public Key",
+            filetypes=[("PEM files", "*.pem"), ("All files", "*.*")]
+        )
+        if path:
+            self.enc_pub_path_var.set(path)
+
+    def browse_sign_pub_key(self):
+        path = filedialog.askopenfilename(
+            title="Select Server Signature Verification Public Key",
+            filetypes=[("PEM files", "*.pem"), ("All files", "*.*")]
+        )
+        if path:
+            self.sign_pub_path_var.set(path)
 
 # =========================================
 # 2. Application / Workflow Logic
@@ -753,22 +821,35 @@ class RegistrationController:
         client_connection_manager.send_registration_request(request_message)
         return request_message
 
-
-    def handle_registration_response(self,response_message):
+    def handle_registration_response(self, response_message, client_crypto_service):
         if response_message is None:
             self.last_registration_error = "No Registration Response"
             self.registration_in_progress = False
             return False
+
+        if client_crypto_service is None:
+            self.last_registration_error = "Client crypto service is unavailable"
+            self.registration_in_progress = False
+            return False
+
+        # Verify server signature on registration response
+        if not client_crypto_service.verify_registration_response_signature(
+                response_message,
+                client_crypto_service.server_signature_verification_public_keys
+        ):
+            self.last_registration_error = "Invalid server signature on registration response"
+            self.registration_in_progress = False
+            return False
+
         if response_message.result_code == "SUCCESS":
             self.last_registration_result = RegistrationResult(
                 success=True,
                 message=response_message.result_message,
                 retry_possible=False
-
-
             )
             self.registration_in_progress = False
             return True
+
         self.last_registration_result = RegistrationResult(
             success=False,
             message=response_message.result_message,
@@ -1690,6 +1771,15 @@ class ClientCryptoService:
         self.server_signature_verification_public_keys = None
         self.crypto_readiness_status = False
 
+    def load_server_public_keys_from_paths(self, enc_pub_path, sign_pub_path):
+        encryption_public_key_bytes = Path(enc_pub_path).read_bytes()
+        signature_public_key_bytes = Path(sign_pub_path).read_bytes()
+
+        self.load_server_public_keys(
+            encryption_public_key_bytes,
+            signature_public_key_bytes
+        )
+
     def load_server_public_keys_from_files(
             self,
             enc_pub_filename="server_enc_dec_pub.pem",
@@ -1723,6 +1813,38 @@ class ClientCryptoService:
             "password_hash":password_hash,
             "reversed_password_hash":reversed_password_hash
         }
+
+    def verify_registration_response_signature(self, response_message, server_public_key_bytes):
+        if response_message is None:
+            return False
+        if response_message.result_code is None:
+            return False
+        if response_message.result_message is None:
+            return False
+        if response_message.signature is None:
+            return False
+        if server_public_key_bytes is None:
+            return False
+
+        try:
+            public_key = RSA.import_key(server_public_key_bytes)
+
+            success = (response_message.result_code == "SUCCESS")
+            retry_possible = not success
+
+            signed_text = (
+                f"{success}|"
+                f"{response_message.result_message}|"
+                f"{retry_possible}"
+            )
+
+            h = SHA3_512.new(signed_text.encode("utf-8"))
+            pkcs1_15.new(public_key).verify(h, response_message.signature)
+            return True
+
+        except (ValueError, TypeError):
+            return False
+
     def derive_authentication_key_from_password(self,password):
         if password is None or password == "":
             return None

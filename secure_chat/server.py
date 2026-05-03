@@ -1,6 +1,6 @@
 #server.py
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext,filedialog
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -502,9 +502,12 @@ class ServerGUI:
         self.authentication_service = None
         self.server_session_manager = None
 
+        # Key file path variables MUST exist before build_ui()
+        self.enc_pair_path_var = tk.StringVar(value=str(BASE_DIR / "server_enc_dec_pub_prv.pem"))
+        self.sign_pair_path_var = tk.StringVar(value=str(BASE_DIR / "server_sign_verify_prv.pem"))
+
         self.build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-
     # =====================================================
     # UI BUILD
     # =====================================================
@@ -533,9 +536,25 @@ class ServerGUI:
         self.port_var = tk.StringVar(value="5000")
         ttk.Entry(port_frame, textvariable=self.port_var, width=20).grid(row=0, column=1)
 
-        # Toggle button
         self.listen_button = ttk.Button(port_frame, text="Listen", command=self.toggle_server)
         self.listen_button.grid(row=0, column=2, padx=(20, 0))
+
+        # =================================================
+        # Server Key Files
+        # =================================================
+        files_frame = ttk.LabelFrame(main, text="Server Key Files", padding=12)
+        files_frame.pack(fill="x", pady=(0, 10))
+
+        ttk.Label(files_frame, text="Enc/Dec Keypair").grid(row=0, column=0, sticky="w", padx=(0, 10), pady=4)
+        ttk.Entry(files_frame, textvariable=self.enc_pair_path_var, width=55).grid(row=0, column=1, sticky="ew", pady=4)
+        ttk.Button(files_frame, text="Browse", command=self.browse_enc_pair).grid(row=0, column=2, padx=(8, 0), pady=4)
+
+        ttk.Label(files_frame, text="Sign/Verify Keypair").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=4)
+        ttk.Entry(files_frame, textvariable=self.sign_pair_path_var, width=55).grid(row=1, column=1, sticky="ew",
+                                                                                    pady=4)
+        ttk.Button(files_frame, text="Browse", command=self.browse_sign_pair).grid(row=1, column=2, padx=(8, 0), pady=4)
+
+        files_frame.columnconfigure(1, weight=1)
 
         # =================================================
         # Master key section
@@ -547,7 +566,6 @@ class ServerGUI:
         self.master_key_var = tk.StringVar()
         ttk.Entry(key_frame, textvariable=self.master_key_var, width=30).grid(row=0, column=1, pady=(0, 10))
 
-        # Channel selection
         channel_frame = ttk.Frame(key_frame)
         channel_frame.grid(row=0, column=2, rowspan=2, padx=(30, 0), sticky="nw")
 
@@ -635,9 +653,20 @@ class ServerGUI:
             ) = setup_server()
 
             # Load RSA key pairs from PEM files
-            rsa_key_set = load_rsa_keyset_from_pem_files(
-                "server_enc_dec_pub_prv.pem",
-                "server_sign_verify_prv.pem"
+            # rsa_key_set = load_rsa_keyset_from_pem_files(
+            #     "server_enc_dec_pub_prv.pem",
+            #     "server_sign_verify_prv.pem"
+            # )
+            enc_pair_path = self.enc_pair_path_var.get().strip()
+            sign_pair_path = self.sign_pair_path_var.get().strip()
+
+            if not enc_pair_path or not sign_pair_path:
+                messagebox.showerror("Key Error", "Please select both server keypair files.")
+                return
+
+            rsa_key_set = load_rsa_keyset_from_pem_paths(
+                enc_pair_path,
+                sign_pair_path
             )
             self.server_crypto_service.load_rsa_keys(rsa_key_set)
 
@@ -822,6 +851,25 @@ class ServerGUI:
             pass
 
         self.root.destroy()
+
+    #==========================================
+    #Browser methods
+    #==========================================
+    def browse_enc_pair(self):
+        path = filedialog.askopenfilename(
+            title="Select Server Encryption/Decryption Keypair",
+            filetypes=[("PEM files", "*.pem"), ("All files", "*.*")]
+        )
+        if path:
+            self.enc_pair_path_var.set(path)
+
+    def browse_sign_pair(self):
+        path = filedialog.askopenfilename(
+            title="Select Server Signing/Verification Keypair",
+            filetypes=[("PEM files", "*.pem"), ("All files", "*.*")]
+        )
+        if path:
+            self.sign_pair_path_var.set(path)
 
 
 # =========================================
@@ -2856,15 +2904,31 @@ class EnrollmentRepository:
             row = cursor.fetchone()
         return row is not None
 
-def load_rsa_keyset_from_pem_files(
-    enc_pair_filename="server_enc_dec_pub_prv.pem",
-    sign_pair_filename="server_sign_verify_prv.pem"
-):
-    enc_pair_path = BASE_DIR / enc_pair_filename
-    sign_pair_path = BASE_DIR / sign_pair_filename
-
-    enc_pair_bytes = enc_pair_path.read_bytes()
-    sign_pair_bytes = sign_pair_path.read_bytes()
+#load from file
+# def load_rsa_keyset_from_pem_files(
+#     enc_pair_filename="server_enc_dec_pub_prv.pem",
+#     sign_pair_filename="server_sign_verify_prv.pem"
+# ):
+#     enc_pair_path = BASE_DIR / enc_pair_filename
+#     sign_pair_path = BASE_DIR / sign_pair_filename
+#
+#     enc_pair_bytes = enc_pair_path.read_bytes()
+#     sign_pair_bytes = sign_pair_path.read_bytes()
+#
+#     enc_private_key = RSA.import_key(enc_pair_bytes)
+#     sign_private_key = RSA.import_key(sign_pair_bytes)
+#
+#     return RsaKeySet(
+#         encryption_public_key=enc_private_key.publickey().export_key(),
+#         decryption_private_key=enc_private_key.export_key(),
+#         signing_private_key=sign_private_key.export_key(),
+#         verification_public_key=sign_private_key.publickey().export_key(),
+#         validity_status=True
+#     )
+#
+def load_rsa_keyset_from_pem_paths(enc_pair_path, sign_pair_path):
+    enc_pair_bytes = Path(enc_pair_path).read_bytes()
+    sign_pair_bytes = Path(sign_pair_path).read_bytes()
 
     enc_private_key = RSA.import_key(enc_pair_bytes)
     sign_private_key = RSA.import_key(sign_pair_bytes)
@@ -2876,7 +2940,6 @@ def load_rsa_keyset_from_pem_files(
         verification_public_key=sign_private_key.publickey().export_key(),
         validity_status=True
     )
-
 
 
 
