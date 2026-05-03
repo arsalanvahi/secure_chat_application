@@ -103,8 +103,8 @@ class ClientGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Chat Client")
-        self.root.geometry("780x700")
-        self.root.minsize(760, 650)
+        self.root.title("Chat Client")
+        self.root.geometry("850x820")
 
         self.app = ClientAppCoordinator()
 
@@ -420,6 +420,7 @@ class ClientGUI:
             if handled:
                 completed = self.app.authentication_controller.complete_authentication()
                 if completed:
+                    self.app.client_session_manager.current_username = username
                     self.set_status("connected / logged in")
                     self.append_message(f"[LOGIN] User '{username}' logged in successfully.")
 
@@ -476,7 +477,8 @@ class ClientGUI:
                 self.app.client_connection_manager
             )
             if send_result:
-                self.append_message(f"[OUTGOING] {plaintext}")
+                username = self.app.client_session_manager.current_username or "Me"
+                self.append_message(f"[{username}] {plaintext}")
                 self.message_var.set("")
             else:
                 messagebox.showerror("Send Error", "Failed to send message.")
@@ -511,10 +513,16 @@ class ClientGUI:
                     receive_result = self.app.incoming_message_processor.handle_incoming_packet(packet)
                     if receive_result:
                         plaintext = self.app.incoming_message_processor.current_recovered_plaintext
-                        self.append_message(f"[INCOMING] {plaintext}")
+                        sender = getattr(packet, "sender_username", "")
+
+                        if sender:
+                            self.append_message(f"[{sender}] {plaintext}")
+                        else:
+                            self.append_message(f"[INCOMING] {plaintext}")
                     else:
                         error_text = self.app.incoming_message_processor.last_receive_error or "Incoming packet rejected."
                         self.append_message(f"[INCOMING ERROR] {error_text}")
+
 
                 elif packet.message_type == MessageType.CONNECTION_LOST:
                     self.set_status("disconnected / connection lost")

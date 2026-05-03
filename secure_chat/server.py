@@ -124,6 +124,8 @@ class SecureMessagePacket:
     message_type:MessageType
     ciphertext:bytes
     hmac:bytes
+    sender_username:str = ""
+
 
 @dataclass
 class DisconnectMessage:
@@ -337,7 +339,8 @@ def message_to_dict(message):
         return {
             "message_type":message.message_type.value,
             "ciphertext":encode_bytes(message.ciphertext),
-            "hmac":encode_bytes(message.hmac)
+            "hmac":encode_bytes(message.hmac),
+            "sender_username":message.sender_username
         }
     if isinstance(message,DisconnectMessage):
         return {
@@ -399,7 +402,9 @@ def dict_to_message(data:dict):
         return SecureMessagePacket(
             message_type=message_type,
             ciphertext=decode_bytes(data["ciphertext"]),
-            hmac=decode_bytes(data["hmac"])
+            hmac=decode_bytes(data["hmac"]),
+            sender_username=data.get("sender_username","")
+
         )
     if message_type == MessageType.DISCONNECT:
         return DisconnectMessage(
@@ -1512,6 +1517,15 @@ class MessageRelayService:
         recipient_ids = server_session_manager.resolve_recipients_for_channel(sender_channel)
         if recipient_ids is None:
             recipient_ids = []
+
+        # Exclude the sender from broadcast recipients
+        sender_connection_id = self.current_relay_context.sender_connection_id
+        recipient_ids = [
+            connection_id
+            for connection_id in recipient_ids
+            if connection_id != sender_connection_id
+        ]
+
         self.current_relay_context.resolved_recipient_ids = recipient_ids
 
         self.last_routing_error = None
@@ -2950,6 +2964,12 @@ def setup_server():
         )
         if not validation_result.success:
             return None
+
+        # Attach authenticated sender username to the relayed packet
+        if sender_session_info is not None and sender_session_info.username is not None:
+            packet.sender_username = sender_session_info.username
+        else:
+            packet.sender_username = "unknown"
 
         message_relay_service.current_relay_context.secure_packet = packet
 
