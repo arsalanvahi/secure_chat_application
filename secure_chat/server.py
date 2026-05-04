@@ -36,7 +36,9 @@ from enum import Enum #Enumeration
 from dataclasses import dataclass,field #field ensures each object gets its own independent list instead of sharing one global list.
 
 # =========================================
-# # Shared / Common Data Structures /common Enums, Constants, Message types
+#  Shared / Common Data Structures /common Enums, Constants, Message types
+# According to our software engineering process, we have defined "communication style
+# placement" in the Architecture.
 # =========================================
 
 
@@ -45,7 +47,7 @@ from dataclasses import dataclass,field #field ensures each object gets its own 
 # of these types so that both sides can distinguish whether the message
 # belongs to the enrollment phase, authentication phase, secure broadcasting
 # phase, or disconnection handling.
-class MessageType(str,Enum):
+class MessageType(str,Enum): #Protocol design contract
     REG_REQ = "REG_REQ" # Client -> Server: encrypted enrollment request
     REG_RES ="REG_RES"
     AUTH_REQ = "AUTH_REQ"
@@ -62,7 +64,7 @@ class MessageType(str,Enum):
 # The server uses these values to inform the client whether login
 # succeeded, failed, or could not continue because channel keys
 # were not yet generated.
-class AuthStatus(str,Enum):
+class AuthStatus(str,Enum): #protocol result
     SUCCESS = "SUCCESS"
     FAILURE = "FAILURE"
     CHANNEL_UNAVAILABLE = "CHANNEL_UNAVAILABLE"
@@ -71,7 +73,7 @@ class AuthStatus(str,Enum):
 # Defines the communication channels supported by the secure chat application.
 # Each client subscribes to one of these channels during enrollment, and that
 # selection determines secure key distribution and message routing.
-class ChannelName(str,Enum):
+class ChannelName(str,Enum): #A shared protocol enum for Publish-Subscribe communication style
     IF100 = "IF100"
     MATH101 = "MATH101"
     SPS101 = "SPS101"
@@ -81,7 +83,7 @@ class ChannelName(str,Enum):
 # It contains the username, password-derived hashes, and selected
 # communication channel before being encrypted and sent to the server.
 @dataclass
-class RegistrationPayload:
+class RegistrationPayload: #a protocol data container for request-reply communication style
     username:str
     password_hash:bytes
     reversed_password_hash:bytes
@@ -93,7 +95,7 @@ class RegistrationPayload:
 # a descriptive result message, and specifies whether
 # another registration attempt is allowed.
 @dataclass
-class RegistrationResult:
+class RegistrationResult: #protocol data container for request-reply communication style
     success:bool
     message:str
     retry_possible:bool=False
@@ -105,7 +107,7 @@ class RegistrationResult:
 # the client's knowledge of the correct password without receiving the
 # password directly.
 @dataclass
-class AuthenticationChallenge:
+class AuthenticationChallenge: #protocol data container for challenge-response communication style
     challenge_bytes:bytes
 
 # AuthenticationResult represents the final outcome of the secure login
@@ -114,7 +116,7 @@ class AuthenticationChallenge:
 # channel is available and whether the channel keys were successfully
 # loaded for secure communication.
 @dataclass
-class AuthenticationResult:
+class AuthenticationResult:  #protocol data container for challenge-response communication style
     status:AuthStatus
     message:str
     channel_available:bool
@@ -125,7 +127,7 @@ class AuthenticationResult:
 # CBC initialization vector, HMAC key, and a flag indicating whether the
 # keys are currently loaded and ready to use.
 @dataclass
-class ChannelKeySet:
+class ChannelKeySet: #security design
     aes_key:bytes
     iv:bytes
     hmac_key:bytes
@@ -136,7 +138,7 @@ class ChannelKeySet:
 # RSA-encrypted registration payload, which includes the username,
 # password-derived hashes, and selected channel.
 @dataclass
-class RegistrationRequestMessage:
+class RegistrationRequestMessage: #protocol data container for request-replay communication style
     message_type:MessageType
     encrypted_payload:bytes
 
@@ -145,7 +147,7 @@ class RegistrationRequestMessage:
 # result code, descriptive message, and a digital signature so the client
 # can verify the authenticity and integrity of the registration result.
 @dataclass
-class RegistrationResponseMessage:
+class RegistrationResponseMessage: #protocol data container for request-reply communication style
     message_type:MessageType # Identifies this packet as a registration response
     result_code:str # High-level result such as SUCCESS or FAILURE
     result_message:str
@@ -156,7 +158,7 @@ class RegistrationResponseMessage:
 # allowing the server to identify the enrolled user and begin the
 # challenge-response authentication sequence.
 @dataclass
-class AuthenticationRequestMessage:
+class AuthenticationRequestMessage: #protocol data container for challenge-response communication style
     message_type:MessageType # Identifies this packet as an authentication request
     username:str # Username of the client attempting to log in
 
@@ -165,7 +167,7 @@ class AuthenticationRequestMessage:
 # that the client must process with a password-derived HMAC key in order
 # to prove knowledge of the correct password.
 @dataclass
-class AuthenticationChallengeMessage:
+class AuthenticationChallengeMessage: #protocol data container for challenge-response communication style
     message_type:MessageType
     challenge:bytes # Server-generated random challenge used in secure login
 
@@ -174,7 +176,7 @@ class AuthenticationChallengeMessage:
 # message type and the HMAC computed over the server's random challenge
 # using a key derived from the client's password.
 @dataclass
-class AuthenticationResponseMessage:
+class AuthenticationResponseMessage: #protocol data container for challenge-response communication style
     message_type:MessageType
     hmac_response:bytes # HMAC over the server challenge using a password-derived key
 
@@ -183,7 +185,7 @@ class AuthenticationResponseMessage:
 # and the server's RSA signature over that encrypted content, allowing the
 # client to verify authenticity and safely recover the result.
 @dataclass
-class AuthenticationResultMessage:
+class AuthenticationResultMessage: #protocol data container for challenge-response communication style
     message_type:MessageType
     encrypted_result:bytes # AES-CBC encrypted authentication outcome and optional channel keys
     signature:bytes # Server's RSA signature over the encrypted result
@@ -193,7 +195,7 @@ class AuthenticationResultMessage:
 # the HMAC used for integrity verification, and optionally the sender's
 # username for GUI display purposes.
 @dataclass
-class SecureMessagePacket:
+class SecureMessagePacket: #protocol data container for publish-subscribe communication style
     message_type:MessageType
     ciphertext:bytes # AES-CBC encrypted message content
     hmac:bytes # HMAC over the ciphertext for integrity verification
@@ -204,7 +206,7 @@ class SecureMessagePacket:
 # and a descriptive reason so the receiving side can perform cleanup and
 # report the disconnection clearly.
 @dataclass
-class DisconnectMessage:
+class DisconnectMessage: #data container
     message_type:MessageType
     reason:str # Human-readable explanation for the disconnection
 # ConnectionLostEvent represents an unexpected interruption in the
@@ -229,7 +231,7 @@ class ConnectionLostEvent:
 # hashes, and the subscribed channel, which are later used for
 # authentication, channel key distribution, and message routing.
 @dataclass
-class EnrollmentRecord:
+class EnrollmentRecord: #persistence design
     username:str # Permanent username of the enrolled user
     password_hash:bytes
     reversed_password_hash:bytes
@@ -240,7 +242,7 @@ class EnrollmentRecord:
 # to protect the server's authentication result, including optional channel
 # key delivery, so that only the correct client can decrypt it.
 @dataclass
-class DerivedResponseProtectionMaterial:
+class DerivedResponseProtectionMaterial:  #security design
     aes_key:bytes # AES-256 key derived from the reversed password hash
     iv:bytes # CBC initialization vector derived from the reversed password has
 
@@ -249,7 +251,7 @@ class DerivedResponseProtectionMaterial:
 # from the channel master secret and are later used to build the active
 # channel key set distributed to authenticated clients.
 @dataclass
-class DerivedChannelKeyMaterial:
+class DerivedChannelKeyMaterial: #security design
         aes_key:bytes
         iv:bytes
         hmac_key:bytes
@@ -260,7 +262,7 @@ class DerivedChannelKeyMaterial:
 # encryption/decryption and the private/public components used for
 # digital signature generation and verification of server responses.
 @dataclass
-class RsaKeySet:
+class RsaKeySet: #security design
         encryption_public_key:bytes
         decryption_private_key:bytes
         signing_private_key:bytes
@@ -272,7 +274,7 @@ class RsaKeySet:
 # the underlying socket object, the client network address, and a flag
 # indicating whether the transport session is still active.
 @dataclass
-class ConnectionHandle:
+class ConnectionHandle: #runtime/session design
         connection_id:str # Unique identifier used to track the connection
         socket_handle:socket.socket # Active socket used for communication with the client
         client_address:tuple # Client network address (IP, port)
@@ -283,7 +285,7 @@ class ConnectionHandle:
 # currently healthy and stores the most recent transport-level error
 # message for debugging and recovery purposes.
 @dataclass
-class TransportHealthState:
+class TransportHealthState: #runtime session design
         healthy:bool=True # Indicates whether the transport layer is currently functioning
         last_error:str = "" # Stores the most recent transport-related error message
 
@@ -292,7 +294,7 @@ class TransportHealthState:
 # associated username, records whether the client has been authenticated,
 # and stores the client's subscribed channel for secure message routing.
 @dataclass
-class ServerSessionInfo:
+class ServerSessionInfo: #runtime/session design
     connection_id:str # Unique transport connection identifier
     username:str
     authenticated:bool
@@ -304,7 +306,7 @@ class ServerSessionInfo:
 # authentication status, and subscribed channel, making it useful for
 # monitoring, GUI reporting, and connected-user management.
 @dataclass
-class ConnectedClientInfo:
+class ConnectedClientInfo: #runtime session design
     connection_id:str
     username:str
     authenticated:bool # Whether the client has completed authentication
@@ -316,7 +318,7 @@ class ConnectedClientInfo:
 # starting up, shutting down, ready to accept connections, and also
 # stores the active port and any status or error messages.
 @dataclass
-class ServerStatus:
+class ServerStatus: #lifecycle/monitoring/admin
     listening:bool
     running:bool
     startup_in_progress:bool
@@ -332,7 +334,7 @@ class ServerStatus:
 # It records the requested operation, relevant parameters, permission flags,
 # progress state, and the latest result or error message.
 @dataclass
-class AdminOperationalContext:
+class AdminOperationalContext: #lifecycle/monitoring/admin
     requested_operation:str # Name of the requested admin action
     requested_port:int|None
     startup_allowed:bool = False # Whether starting the server is currently allowed
@@ -346,7 +348,7 @@ class AdminOperationalContext:
 # server is running or listening, and keeps the latest lifecycle result
 # and error messages for status reporting and debugging.
 @dataclass
-class ServerLifecycleState:  #server only
+class ServerLifecycleState:  #lifecycle/monitoring/admin
     lifecycle_phase: str # Descriptive name of the current lifecycle phase
     startup_in_progress:bool=False
     shutdown_in_progress:bool=False
@@ -362,7 +364,7 @@ class ServerLifecycleState:  #server only
 # listening state of the server.
 #describes the phase/state of the server lifecycle itself
 @dataclass
-class LifecycleResult:
+class LifecycleResult: #lifecycle/monitoring/admin
     success:bool # Whether the lifecycle operation succeeded
     message:str
     error:str
@@ -375,7 +377,7 @@ class LifecycleResult:
 # available, and whether the transport subsystem is healthy.
 #describes a high-level runtime summary of the server while it is operating
 @dataclass
-class MonitoringSnapshot: #server_only
+class MonitoringSnapshot: #lifecycle/monitoring/admin
     running:bool = False
     listening:bool=False
     connected_clients_count:int=0
@@ -388,7 +390,7 @@ class MonitoringSnapshot: #server_only
 # monitoring objects, and lifecycle-related components. It helps
 # organize in-memory state that exists only while the server is running.
 @dataclass
-class RuntimeStructureRegistry: #server_only
+class RuntimeStructureRegistry: #lifecycle/monitoring/admin
     structures:dict = field(default_factory = dict)
 
 # RetryRecoveryState stores the server's recovery-related state after
@@ -397,7 +399,7 @@ class RuntimeStructureRegistry: #server_only
 # latest recovery-related error message.
 #If something goes wrong, what should the server remember about retrying or recovering?
 @dataclass
-class RetryRecoveryState: #sever_only
+class RetryRecoveryState: #lifecycle/monitoring/admin
     retry_allowed:bool=False
     recovery_needed:bool=False
     partial_cleanup_required:bool=False
@@ -407,7 +409,7 @@ class RetryRecoveryState: #sever_only
 # are used to determine whether authenticated clients can receive channel
 # keys and begin secure communication in their subscribed channel.
 @dataclass
-class ChannelAvailabilityState: #sever_only
+class ChannelAvailabilityState: #runtime/session design
     if100_available:bool=False
     math101_available:bool=False
     sps101_available:bool=False
@@ -419,7 +421,7 @@ class ChannelAvailabilityState: #sever_only
 # routing is allowed, the sender's channel, the packet being relayed,
 # the resolved recipient list, and any recipients for whom delivery failed.
 @dataclass
-class RelayContext: #sever_only
+class RelayContext: #publish-subscribe communication style
     sender_connection_id: str
     sender_session_info:ServerSessionInfo | None
     secure_packet:SecureMessagePacket | None = None #if no value is provided, start with None
@@ -437,7 +439,7 @@ class RelayContext: #sever_only
 # message or error description, indicates whether the sender was authenticated,
 # stores the sender's channel, and records how many recipients were involved.
 @dataclass
-class RelayResult: #server_only
+class RelayResult: #publish-subscribe communication style
     success:bool
     message:str
     error: str
@@ -446,18 +448,28 @@ class RelayResult: #server_only
     recipient_count:int = 0 # Number of recipients resolved or reached
 
 
-#Shared Serialization/Fraiming Helpers
+# =========================================
+# transport/protocol helper functions for
+# persistent socket communication
+# =========================================
+
+
+#JSON cannot directly store raw data, therefor we must
+#convert them to Base64 string.
+
+#encoding to Base64 stream
 def encode_bytes(value:bytes|None):
     if value is None:
         return None
     return base64.b64encode(value).decode("utf_8")
-
+#decoding
 def decode_bytes(value:str|None):
     if value is None:
         return None
     return base64.b64decode(value.encode("utf_8"))
 
-
+#convert Python message objects into bytes
+#role: protocol object translator make it suitable for JSON conversion
 def message_to_dict(message):
     if message is None:
         return None
@@ -513,9 +525,6 @@ def message_to_dict(message):
             "details":message.details
         }
     raise ValueError(f"Unsupported message type for serialization:{type(message)}")
-
-
-
 
 
 def dict_to_message(data:dict):
@@ -579,17 +588,11 @@ def dict_to_message(data:dict):
     raise ValueError(f"Unsupported message type for deserialization:{message_type}")
 
 
-
-
-
-
-
+#converting message objects to JSON bytes
 def serialize_message(message) -> bytes:
     message_dict= message_to_dict(message)
     json_text = json.dumps(message_dict,separators=(",",":"))
     return json_text.encode("utf-8")
-
-
 
 
 def deserialize_message(payload:bytes):
@@ -602,7 +605,7 @@ def deserialize_message(payload:bytes):
 
 
 
-
+#separate one message from the next on the TCP stream
 def send_framed(sock,payload:bytes):
     if payload is None:
         return False
