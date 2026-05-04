@@ -1,16 +1,12 @@
-import threading
-import time
+from dataclasses import dataclass, field
 
-def task(name):
-    for i in range(3):
-        print(name, i)
-        time.sleep(1)
+@dataclass
+class User:
+    name: str
+    scores: list = field(default_factory=list)
+u1 = User("Ali")
+u2 = User("Bob")
+u1.scores.append(10)
+print(u1.scores)
 
-t1 = threading.Thread(target=task, args=("A",))
-t2 = threading.Thread(target=task, args=("B",))
 
-t1.start()
-t2.start()
-
-t1.join()
-t2.join()
