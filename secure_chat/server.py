@@ -2634,7 +2634,7 @@ class ServerLifecycleManager:
     def get_lifecycle_state(self):
         result_text  = ""
         if self.last_lifecycle_result is not None:
-            result_text = self.last_lifecycle_result.message
+            result_text = self.last_lifecycle_result.message   
 
         return ServerLifecycleState(
             lifecycle_phase=self.lifecycle_phase if self.lifecycle_phase is not None else "stopped",
