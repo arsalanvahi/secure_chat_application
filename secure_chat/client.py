@@ -1,4 +1,4 @@
-#client.py should be organized in this order
+#client.py
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext,filedialog
 

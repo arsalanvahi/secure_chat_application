@@ -12,14 +12,21 @@ import hashlib
 
 
 from Crypto.Cipher import AES,PKCS1_OAEP
+#PKCS1_OAEP is a padding schem  + formatting scheme used with RSA encryption.
 from Crypto.Util.Padding import pad
+#Helper function used for padding in with symmetric encryptions like AES
 from Crypto.Signature import pkcs1_15
+#pkcs1_15 is a digital signature scheme for signing data and verifying signature
 from Crypto.Hash import SHA3_512
+#SHA3-512 is a hash
 from Crypto.PublicKey import RSA
+#RSA asymmetric encryption cipher
 
 #persistent store
 import sqlite3
+#built sqlite3 database module
 import threading
+
 
 
 #socket implementation imports
