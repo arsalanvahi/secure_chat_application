@@ -1,4 +1,16 @@
+##################################################
 #server.py
+#the code is organized in layered architecture:
+#1.Server GUI / Presentation Layer
+#2-Application/Service Logic Layer
+#3-Transport/Lifecycle Layer
+#4-Security Layer
+#5-Runtime State Layer
+#6-Persistence Layer
+####################################################
+
+
+
 # =========================================
 # required imports
 # =========================================
@@ -275,7 +287,7 @@ class RsaKeySet: #security design
 # the underlying socket object, the client network address, and a flag
 # indicating whether the transport session is still active.
 @dataclass
-class ConnectionHandle: #runtime/session design
+class ConnectionHandle: #runtime/session data container for a client
         connection_id:str # Unique identifier used to track the connection
         socket_handle:socket.socket # Active socket used for communication with the client
         client_address:tuple # Client network address (IP, port)
@@ -640,7 +652,7 @@ def recv_framed(sock):
 
 
 # =========================================
-# 1. Server GUI / Presentation
+# 1. Server GUI / Presentation Layer
 # =========================================
 
 class ServerGUI:
@@ -1036,7 +1048,7 @@ class ServerGUI:
 
 
 # =========================================
-# 3. Application / Service Logic
+# 2. Application / Service Logic Layer
 # =========================================
 class ServerAppCoordinator:
     def __init__(self):
@@ -2071,16 +2083,29 @@ class ChannelKeyManager:
 
 
 # =========================================
-# 4. Transport / Lifecycle
+# 3. Transport / Lifecycle Layer
+# =========================================
+
+# =========================================
+# Sever's networking/communication manager
+# Responsible for low-level transport communication between
+# the server and the connected client. It handles things like
+# keeping the listening socket, tracking active client connections,
+# opening and closing sessions, sending/receving framed protocol message,
+# dispatching incoming packets to the correct handler,broadcasting  packets
+# to multiple recipients,and tracking transport-layer related health/errors
 # =========================================
 class ServerTransportManager:
     def __init__(self):
-        self.listening_socket = None
-        self.accept_loop_state = False
-        self.active_connection_handler_set = {}
-        self.packet_dispatch_registry = {}
-        self.packet_dispatch_authentication = {}
-        self.transport_health_state = TransportHealthState()
+        self.listening_socket = None #stores listening socket
+        self.accept_loop_state = False #is server  accepting new connections?
+        self.active_connection_handler_set = {} #stores current active client connection handles
+        self.packet_dispatch_registry = {} #dispatches received packets to the correct handler
+        #self.packet_dispatch_authentication = {}
+        self.transport_health_state = TransportHealthState() #detect disconnections and updates the health state
+
+    #marks the transport manager as ready to accept new connections
+    #marks the transport manager as accept mode
     def start_accepting_client_connections(self):
         if self.listening_socket is None:
             self.accept_loop_state = False
@@ -2094,18 +2119,17 @@ class ServerTransportManager:
 
         return True
 
-
-
-
-
+    #stops the acceptance of new incoming connections
+    #supports the controlled shutdown
     def stop_accepting_client_connections(self):
         self.accept_loop_state = False
         self.transport_health_state.healthy = True
         self.transport_health_state.last_error = ""
         return True
-
+    #receiving application-level packet message from a client(high-level)
     def receive_client_packet(self,connection_id):
         return self.receive_application_message(connection_id)
+    #
     def dispatch_incoming_packet(self,connection_id, packet):
         if packet is None:
             return None
@@ -2113,23 +2137,24 @@ class ServerTransportManager:
         handler = self.packet_dispatch_registry.get(message_type)
         if handler is None:
             return None
-
         return handler(connection_id,packet)
 
+    #sending application-level packet (high-level)
     def send_response_to_client(self,connection_id, response_bytes):
         return self.send_application_message(connection_id,response_bytes)
+    #sends the same packet to multiple connected clients
     def broadcast_packet_to_recipients(self,recipients_ids,response_bytes):
         results = {}
         for recipients_id in recipients_ids:
             results[recipients_id] = self.send_application_message(recipients_id,response_bytes)
         return results
-
-
+    #handling transport-side detection of a client disconnect
     def detect_client_disconnect(self,connection_id):
         self.close_session(connection_id)
+    #registers the packet-type (handler mapping: registration handler/authentication handler/message relay handler/diconnect handler)
     def register_transport_handlers(self,handlers):
         self.packet_dispatch_registry = handlers
-
+    #creates a ConnectionHandle and stores it in the active connection registry
     def open_session(self,connection_id,socket_handle,client_address,):
         handle = ConnectionHandle(
             connection_id=connection_id,
@@ -2139,6 +2164,7 @@ class ServerTransportManager:
         )
         self.active_connection_handler_set[connection_id] = handle
         return handle
+    #closes the client socket and removes the session from the transport registry
     def close_session(self,connection_id):
         handle= self.active_connection_handler_set.get(connection_id)
         if handle is None:
@@ -2149,6 +2175,7 @@ class ServerTransportManager:
             pass
         handle.active = False
         del self.active_connection_handler_set[connection_id]
+    #sends one protocol message (raw bytes payload) to a specific client
     def send_application_message(self,connection_id, data):
         handle = self.active_connection_handler_set.get(connection_id)
         if handle is None:
@@ -2167,9 +2194,7 @@ class ServerTransportManager:
             self.transport_health_state.last_error = str(error)
             self.detect_client_disconnect(connection_id)
         return  False
-
-
-
+    #receives one framed protocol message from a client and deserialize it
     def receive_application_message(self,connection_id):
         handle = self.active_connection_handler_set.get(connection_id)
         if handle is None:
@@ -2260,6 +2285,7 @@ class ServerLifecycleManager:
 
 
     #creates the listening socket and binds it to the chosen port.
+    #makes the server reachable by the client
     def bind_and_listen(self,port,server_transport_manager):
         if port is None:
             self.last_lifecycle_error = "listening port is missing"
@@ -2303,8 +2329,8 @@ class ServerLifecycleManager:
             self.lifecycle_phase = "binding"
 
             listening_socket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-            listening_socket.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-            listening_socket.bind(("",port))
+            listening_socket.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1) #allow this socket to reuse the same address
+            listening_socket.bind(("",port)) #listen to all available network interfaces
             listening_socket.listen()
 
             server_transport_manager.listening_socket = listening_socket
@@ -2334,7 +2360,8 @@ class ServerLifecycleManager:
             )
             return self.last_lifecycle_result
 
-
+    #marks the server as fully running
+    #transition server from startup work to normal operation
     def enter_running_state(self):
         try:
             self.lifecycle_phase = "running"
@@ -2364,6 +2391,8 @@ class ServerLifecycleManager:
             )
             return self.last_lifecycle_result
 
+    #starts the shutdown process
+    #controlled entry of the shutdown sequence
     def begin_shutdown(self,server_status):
         if server_status is None:
             self.last_lifecycle_error = "server status not found"
@@ -2407,6 +2436,9 @@ class ServerLifecycleManager:
             running=server_status.running
         )
         return self.last_lifecycle_result
+
+    #stops the server from accepting additional clients
+    #blocks new incoming clients before cleanup continues
     def stop_accepting_new_connections(self,server_transport_manager):
         if server_transport_manager is None:
             self.last_lifecycle_error = "Transport manager is missing"
@@ -2440,7 +2472,8 @@ class ServerLifecycleManager:
             running=True
         )
         return self.last_lifecycle_result
-
+    #closes all currently connected client sessions
+    #the server doesn't leave clients half-connected or username remain as active
     def terminate_active_sessions(self,server_session_manager,server_transport_manager):
         if server_session_manager is None:
             self.last_lifecycle_error = "Session Manager is missing"
@@ -2521,9 +2554,10 @@ class ServerLifecycleManager:
 
         )
         return self.last_lifecycle_result
+    #release runtime resources after sessions are closes
+    #resets the runtime environment (runtime channel keys forgotten)
     def release_runtime_resources(self,server_transport_manager,server_runtime_context,channel_key_manager=None):
         try:
-            # Release transport listening socket
             if server_transport_manager is not None:
                 if server_transport_manager.listening_socket is not None:
                     try:
@@ -2537,12 +2571,10 @@ class ServerLifecycleManager:
                 server_transport_manager.transport_health_state.healthy = True
                 server_transport_manager.transport_health_state.last_error = ""
 
-                # Clear runtime context
             if server_runtime_context is not None:
                 server_runtime_context.clear_runtime_state()
 
 
-            # Clear runtime-only channel key material if provided
             if channel_key_manager is not None:
                 channel_key_manager.clear_channel_keys()
 
@@ -2567,7 +2599,8 @@ class ServerLifecycleManager:
             )
             return self.last_lifecycle_result
 
-
+    #marks shutdown as complete
+    #returns a successful LifecycleResult
     def finalize_shutdown(self):
         try:
             self.lifecycle_phase = "stopped"
@@ -2596,7 +2629,8 @@ class ServerLifecycleManager:
             return self.last_lifecycle_result
 
 
-
+    #returning ServerLifecycleState snapshot
+    #we use this for GUI monitoring
     def get_lifecycle_state(self):
         result_text  = ""
         if self.last_lifecycle_result is not None:
@@ -2614,7 +2648,7 @@ class ServerLifecycleManager:
 
 
 # =========================================
-# 5. Security Layer
+# 4. Security Layer
 # =========================================
 class ServerCryptoService:
     def __init__(self):
@@ -2781,7 +2815,7 @@ class ServerCryptoService:
 
 
 # =========================================
-# 6. Runtime State
+# 5. Runtime State Layer
 # =========================================
 class ServerSessionManager:
     def __init__(self):
@@ -3006,7 +3040,7 @@ class ServerRuntimeContext:
 
 
 # =========================================
-# 7. Persistence
+# 6. Persistence Layer
 # =========================================
 class EnrollmentRepository:
     def __init__(self,db_path="secure_chat.db"):
