@@ -49,6 +49,7 @@ from dataclasses import dataclass,field #field ensures each object gets its own 
 # phase, or disconnection handling.
 class MessageType(str,Enum): #Protocol design contract
     REG_REQ = "REG_REQ" # Client -> Server: encrypted enrollment request
+
     REG_RES ="REG_RES"
     AUTH_REQ = "AUTH_REQ"
     AUTH_CHALLENGE = "AUTH_CHALLENGE"
@@ -64,7 +65,7 @@ class MessageType(str,Enum): #Protocol design contract
 # The server uses these values to inform the client whether login
 # succeeded, failed, or could not continue because channel keys
 # were not yet generated.
-class AuthStatus(str,Enum): #protocol result
+class AuthStatus(str,Enum): #protocol result contract
     SUCCESS = "SUCCESS"
     FAILURE = "FAILURE"
     CHANNEL_UNAVAILABLE = "CHANNEL_UNAVAILABLE"
@@ -313,10 +314,8 @@ class ConnectedClientInfo: #runtime session design
     channel:ChannelName
 
 
-# ServerStatus represents the current lifecycle and operational state
-# of the server. It records whether the server is listening, running,
-# starting up, shutting down, ready to accept connections, and also
-# stores the active port and any status or error messages.
+#A data structure used to record the servers current operational state
+# and lifecycle.
 @dataclass
 class ServerStatus: #lifecycle/monitoring/admin
     listening:bool
@@ -357,12 +356,8 @@ class ServerLifecycleState:  #lifecycle/monitoring/admin
     last_lifecycle_result:str=""
     last_lifecycle_error:str=""
 
-
-# LifecycleResult represents the outcome of a specific server lifecycle
-# operation. It records whether the action succeeded, provides a result
-# message or error description, and indicates the resulting running and
-# listening state of the server.
-#describes the phase/state of the server lifecycle itself
+#A data container that records the outcome of a specific server lifecycle
+#operation. It records whether the action succeeded, throws an error, and so
 @dataclass
 class LifecycleResult: #lifecycle/monitoring/admin
     success:bool # Whether the lifecycle operation succeeded
@@ -451,6 +446,13 @@ class RelayResult: #publish-subscribe communication style
 # =========================================
 # transport/protocol helper functions for
 # persistent socket communication
+#message object goes through these steps :
+#1→ serialize_message(...)
+# 1.1 message_to_dict converts to normal python dictionary
+# 1.2 convert dictionary to JSON standardized text format
+# 1.3 text encoded to bytes
+#2→ send_framed(...) it sends [length header][JSON bytes]
+#3→ socket transmission
 # =========================================
 
 
@@ -594,7 +596,7 @@ def serialize_message(message) -> bytes:
     json_text = json.dumps(message_dict,separators=(",",":"))
     return json_text.encode("utf-8")
 
-
+#convert JSON bytes to message objects
 def deserialize_message(payload:bytes):
     if payload is None:
         return None
@@ -604,8 +606,9 @@ def deserialize_message(payload:bytes):
 
 
 
-
-#separate one message from the next on the TCP stream
+#implementing message framing
+#separate one message from the next on the TCP stream because TCP does not
+#preserver message boundaries. Adding 4-byte header containing the payload length
 def send_framed(sock,payload:bytes):
     if payload is None:
         return False
@@ -614,7 +617,8 @@ def send_framed(sock,payload:bytes):
     return True
 
 
-
+#reads exactly a specified number of bytes from the socket
+#used in recv_framed method
 def recv_exact(sock,size:int):
     buffer = b""
     while len(buffer) < size:
@@ -623,15 +627,12 @@ def recv_exact(sock,size:int):
             return None
         buffer+=chunk
     return buffer
-
-
-
 def recv_framed(sock):
-    header = recv_exact(sock,4)
+    header = recv_exact(sock,4) #reading the 4-byte header,
     if header is None:
         return None
-    payload_length = struct.unpack("!I",header)[0]
-    if payload_length <=0:
+    payload_length = struct.unpack("!I",header)[0] #! → network byte order (big-endian)
+    if payload_length <=0:                                #I → unsigned 4-byte integer
         return None
     payload = recv_exact(sock,payload_length)
     return payload
@@ -2186,14 +2187,28 @@ class ServerTransportManager:
             self.detect_client_disconnect(connection_id)
             return None
 
-
+# =========================================
+#server's operational state controller
+#This class controls, coordinates, and reports the server’s
+# startup/shutdown process. Server Lifecycle is:
+# validating the server can start, initializing the runtime,
+# binding the listening socket, entering the running state,
+# beginning shutdown, stopping acceptance of new connections,
+# terminating active sessions,releasing runtime resources,
+# finalizing shutdown, and reporting the current lifecycle state.
+# Based on the current server's current lifecycle state, it
+# produces a result that records in LifeCycleResult.
+# =========================================
 class ServerLifecycleManager:
+    # initializing internal operational states
     def __init__(self):
         self.lifecycle_phase = None
         self.startup_in_progress = False
         self.shutdown_in_progress = False
         self.last_lifecycle_result = None
         self.last_lifecycle_error = None
+    #checks whether the server is in a valid state to start
+    #used ServerStatus
     def validate_startup_request(self,server_status):
         if server_status is None:
             self.last_lifecycle_error = "server status is missing"
@@ -2213,7 +2228,7 @@ class ServerLifecycleManager:
 
         return True
 
-
+    #Marks the beginning of startup
     def initialize_runtime(self):
         try:
             self.last_lifecycle_result = None
@@ -2244,7 +2259,7 @@ class ServerLifecycleManager:
             return self.last_lifecycle_result
 
 
-
+    #creates the listening socket and binds it to the chosen port.
     def bind_and_listen(self,port,server_transport_manager):
         if port is None:
             self.last_lifecycle_error = "listening port is missing"
@@ -2599,7 +2614,7 @@ class ServerLifecycleManager:
 
 
 # =========================================
-# 5. Security
+# 5. Security Layer
 # =========================================
 class ServerCryptoService:
     def __init__(self):
