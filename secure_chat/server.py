@@ -1596,6 +1596,7 @@ class MessageRelayService:
         self.last_relay_result  = None #RelayResult
         self.last_routing_error = None
     #the methods checks whether the sender is allowed to send/receive message
+    # based on RelayContext and RelayResult
     def validate_sender_for_routing(self,sender_connection_id, sender_session_info):
         if sender_connection_id is None:
             self.last_routing_error = "sender connection_id is missing"
@@ -1695,7 +1696,7 @@ class MessageRelayService:
         )
         return self.last_relay_result
 
-    #
+    #determines which clients receive the secure message
     def resolve_channel_recipients(self,server_session_manager):
         if server_session_manager is None:
             self.last_routing_error = "server session manager is missing"
@@ -1769,7 +1770,7 @@ class MessageRelayService:
 
 
 
-
+    #relaying the packet after validation and defined which recipients should get the packet
     def relay_secure_packet(self,server_transport_manager):
         if server_transport_manager is None:
             self.last_routing_error = "server transport manager is missing"
@@ -1851,13 +1852,7 @@ class MessageRelayService:
         )
         return self.last_relay_result
 
-
-
-
-
-
-
-
+    #sends packet to all rightful recipients
     def broadcast_packet_unchanged(self,recipient_ids,secure_packet, server_transport_manager):
         if recipient_ids is None:
             self.last_routing_error = "Recipient list is missing"
@@ -1908,7 +1903,7 @@ class MessageRelayService:
         return True
 
 
-
+    #handling fail or disconnection situations during sending messages
     def handle_recipient_disconnect_during_relay(self):
         if self.current_relay_context is None:
             self.last_routing_error = "Relay context is missing"
@@ -1952,13 +1947,10 @@ class MessageRelayService:
             recipient_count=successful_count
         )
         return self.last_relay_result
-
-
-
-
-
+    #not used
     def record_relay_event(self):
         pass
+    #not used
     def notify_traffic_monitor(self):
         pass
 
