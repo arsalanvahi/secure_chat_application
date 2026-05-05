@@ -1796,10 +1796,11 @@ class ClientConnectionManager:
 # =========================================
 class ClientCryptoService:
     def __init__(self):
-        self.server_encryption_public_keys = None
+        self.server_encryption_public_keys = None #stores the server's RSA public key
         self.server_signature_verification_public_keys = None
         self.crypto_readiness_status = False
 
+    # loads the server's public keys from the user-selected path
     def load_server_public_keys_from_paths(self, enc_pub_path, sign_pub_path):
         encryption_public_key_bytes = Path(enc_pub_path).read_bytes()
         signature_public_key_bytes = Path(sign_pub_path).read_bytes()
@@ -1809,28 +1810,14 @@ class ClientCryptoService:
             signature_public_key_bytes
         )
 
-    def load_server_public_keys_from_files(
-            self,
-            enc_pub_filename="server_enc_dec_pub.pem",
-            sign_pub_filename="server_sign_verify_pub.pem"
-    ):
-        enc_pub_path = BASE_DIR / enc_pub_filename
-        sign_pub_path = BASE_DIR / sign_pub_filename
-
-        encryption_public_key_bytes = enc_pub_path.read_bytes()
-        signature_public_key_bytes = sign_pub_path.read_bytes()
-
-        self.load_server_public_keys(
-            encryption_public_key_bytes,
-            signature_public_key_bytes
-        )
-
+    # stores the server's public keys inside ClientCryptoService
     def load_server_public_keys(self, encryption_public_key_bytes, signature_public_key_bytes):
         self.server_encryption_public_keys = encryption_public_key_bytes
         self.server_signature_verification_public_keys = signature_public_key_bytes
         self.crypto_readiness_status = True
 
-
+    # registration-related role
+    # derived two password-based values
     def derive_enrollment_values_from_password(self,password):
         password_bytes = password.encode("utf-8")
         reversed_password_bytes = password[::-1].encode("utf-8")
@@ -1842,7 +1829,8 @@ class ClientCryptoService:
             "password_hash":password_hash,
             "reversed_password_hash":reversed_password_hash
         }
-
+    # server-response verification role
+    # verifies the server's digital signature on a registration response
     def verify_registration_response_signature(self, response_message, server_public_key_bytes):
         if response_message is None:
             return False
@@ -1874,6 +1862,8 @@ class ClientCryptoService:
         except (ValueError, TypeError):
             return False
 
+    # authenticated-related role
+    # derives HMAC key
     def derive_authentication_key_from_password(self,password):
         if password is None or password == "":
             return None
@@ -1881,6 +1871,7 @@ class ClientCryptoService:
         password_hash = hashlib.sha3_512(password_bytes).digest()
         hmac_key = password_hash[32:]
         return hmac_key
+    # derives the AES and IV needed to decrypt the server's protected authenticated result
     def derive_response_decryption_material_from_password(self,password):
         reversed_password = password[::-1]
         reversed_password_bytes = reversed_password.encode("utf-8")
@@ -1891,7 +1882,7 @@ class ClientCryptoService:
             "response_decryption_key":response_decryption_key,
             "response_decryption_iv":response_decryption_iv,
         }
-
+    # encrypts the client's registration information before sending it to the server
     def encrypt_registration_request(self, registration_payload):
         if registration_payload is None:
             return None
@@ -1919,6 +1910,8 @@ class ClientCryptoService:
         except Exception:
             return None
 
+    # SecureMessage role
+    # encrypting the outgoing message using AES-CBC
     def encrypt_secure_message(self,message,aes_key,iv):
         if message is None:
             return None
@@ -1941,16 +1934,19 @@ class ClientCryptoService:
         except Exception:
             return None
 
-
+    # generate HMAC value for a message
     def compute_integrity_value(self,message_bytes,integrity_key):
         if message_bytes is None or integrity_key is None:
             return None
         return hmac.new(integrity_key,message_bytes,hashlib.sha3_512).digest()
 
+    # compares the received integrity value with an expected value
     def verify_integrity_value(self,value,expected_value):
         if value is None or expected_value is None:
             return False
         return hmac.compare_digest(value, expected_value)
+
+    # verifies the server's digital signature on an authenticated result message
     def verify_digital_signature(self,authentication_result_message,server_public_key_bytes):
         if authentication_result_message is None:
             return False
@@ -1966,6 +1962,7 @@ class ClientCryptoService:
         except(ValueError,TypeError):
             return False
 
+    # decrypts the protected authentication result received from the server
     def decrypt_protected_response(self,authentication_result_message,derived_material):
         #decrypt AES-CBC encrypted authenticated result
         if authentication_result_message is None:
@@ -1985,7 +1982,7 @@ class ClientCryptoService:
         except Exception:
             return None
 
-
+    # decrypts the incoming message after passing HMAC verification
     def decrypt_incoming_message(self,message,aes_key,iv):
         if message is None:
             return None
