@@ -627,11 +627,11 @@ class ServerGUI:
         self.authentication_service = None
         self.server_session_manager = None
 
-        # Key file path variables MUST exist before build_ui()
+
         self.enc_pair_path_var = tk.StringVar(value=str(BASE_DIR / "server_enc_dec_pub_prv.pem"))
         self.sign_pair_path_var = tk.StringVar(value=str(BASE_DIR / "server_sign_verify_prv.pem"))
 
-        self.build_ui()
+        self.build_ui() #construct UI
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
     # =====================================================
     # UI BUILD
@@ -640,9 +640,9 @@ class ServerGUI:
         main = ttk.Frame(self.root, padding=10)
         main.pack(fill="both", expand=True)
 
-        # -----------------------------
-        # Top bar
-        # -----------------------------
+
+        ######## Top bar section ##########
+
         top_bar = ttk.Frame(main)
         top_bar.pack(fill="x", pady=(0, 8))
 
@@ -651,9 +651,9 @@ class ServerGUI:
         self.status_var = tk.StringVar(value="Status: disconnected")
         ttk.Label(top_bar, textvariable=self.status_var).pack(side="right")
 
-        # =================================================
-        # Port section
-        # =================================================
+
+        ###### Port section ###############################
+
         port_frame = ttk.LabelFrame(main, text="Port", padding=12)
         port_frame.pack(fill="x", pady=(0, 10))
 
@@ -664,9 +664,9 @@ class ServerGUI:
         self.listen_button = ttk.Button(port_frame, text="Listen", command=self.toggle_server)
         self.listen_button.grid(row=0, column=2, padx=(20, 0))
 
-        # =================================================
-        # Server Key Files
-        # =================================================
+
+        ######## Server Key Files section ########################
+
         files_frame = ttk.LabelFrame(main, text="Server Key Files", padding=12)
         files_frame.pack(fill="x", pady=(0, 10))
 
@@ -681,9 +681,9 @@ class ServerGUI:
 
         files_frame.columnconfigure(1, weight=1)
 
-        # =================================================
-        # Master key section
-        # =================================================
+
+        ##### Master key section ###########################
+
         key_frame = ttk.LabelFrame(main, text="Master Key", padding=12)
         key_frame.pack(fill="x", pady=(0, 10))
 
@@ -697,20 +697,19 @@ class ServerGUI:
         ttk.Label(channel_frame, text="Channel").pack(anchor="w")
 
         self.channel_var = tk.StringVar(value=ChannelName.IF100.value)
-        ttk.Radiobutton(channel_frame, text="option 1  IF100",
+        ttk.Radiobutton(channel_frame, text="IF100",
                         variable=self.channel_var, value=ChannelName.IF100.value).pack(anchor="w")
-        ttk.Radiobutton(channel_frame, text="option 2  MATH101",
+        ttk.Radiobutton(channel_frame, text="MATH101",
                         variable=self.channel_var, value=ChannelName.MATH101.value).pack(anchor="w")
-        ttk.Radiobutton(channel_frame, text="option 3  SPS101",
+        ttk.Radiobutton(channel_frame, text="SPS101",
                         variable=self.channel_var, value=ChannelName.SPS101.value).pack(anchor="w")
 
         ttk.Button(key_frame, text="Generate", command=self.generate_keys).grid(
             row=1, column=1, sticky="e", pady=(5, 0)
         )
 
-        # =================================================
-        # Log tabs
-        # =================================================
+
+        ########## Log tabs section ################################
         log_frame = ttk.Frame(main)
         log_frame.pack(fill="both", expand=True)
 
@@ -727,9 +726,7 @@ class ServerGUI:
 
             self.log_boxes[channel.value] = box
 
-    # =====================================================
-    # Helpers
-    # =====================================================
+    # writes text into the correct channel log box
     def log(self, text, channel=None):
         if channel and channel in self.log_boxes:
             box = self.log_boxes[channel]
@@ -743,18 +740,20 @@ class ServerGUI:
             box.see("end")
             box.configure(state="disabled")
 
+    #updates the staus label
     def set_status(self, text):
         self.status_var.set(f"Status: {text}")
 
+    #switches between start server and stop server
     def toggle_server(self):
         if self.server_running:
             self.stop_server()
         else:
             self.start_server()
 
-    # =====================================================
-    # Server control
-    # =====================================================
+    ####################################################
+    ####### Server controls ############################
+    ####################################################
     def start_server(self):
         if self.server_running:
             messagebox.showinfo("Server", "Server already running.")
@@ -868,6 +867,7 @@ class ServerGUI:
         self.set_status("disconnected")
         self.log("Server stopped")
 
+
     def generate_keys(self):
         if not self.server_running:
             messagebox.showwarning("Server", "Start the server first.")
@@ -896,9 +896,7 @@ class ServerGUI:
         except Exception as error:
             messagebox.showerror("Key Error", str(error))
 
-    # =====================================================
-    # Accept loop
-    # =====================================================
+
     def accept_loop(self):
         while not self.stop_event.is_set():
             try:
@@ -926,9 +924,8 @@ class ServerGUI:
             worker.start()
             self.connection_threads.append(worker)
 
-    # =====================================================
-    # Per-client loop
-    # =====================================================
+
+
     def connection_loop(self, connection_id):
         while not self.stop_event.is_set():
             if connection_id not in self.server_transport_manager.active_connection_handler_set:
@@ -962,9 +959,8 @@ class ServerGUI:
 
         self.log(f"Closed connection: {connection_id}")
 
-    # =====================================================
-    # Shutdown
-    # =====================================================
+
+
     def on_close(self):
         try:
             self.stop_server()
@@ -973,9 +969,7 @@ class ServerGUI:
 
         self.root.destroy()
 
-    #==========================================
-    #Browser methods
-    #==========================================
+
     def browse_enc_pair(self):
         path = filedialog.askopenfilename(
             title="Select Server Encryption/Decryption Keypair",
@@ -996,8 +990,6 @@ class ServerGUI:
 # =========================================
 # 2. Application / Service Logic Layer
 # =========================================
-
-
 
 
 # =========================================
@@ -3158,10 +3150,11 @@ def load_rsa_keyset_from_pem_paths(enc_pair_path, sign_pair_path):
 
 # =========================================
 # whole server assembler
-# responsibilities: creating major server components, 
+# responsibilities: creating major server components,
 #
 # =========================================
 def setup_server():
+    #create major server components
     server_transport_manager = ServerTransportManager()
     registration_service = RegistrationService()
     server_crypto_service = ServerCryptoService()
@@ -3171,13 +3164,16 @@ def setup_server():
     server_session_manager = ServerSessionManager()
     message_relay_service = MessageRelayService()
 
+    # handler for incoming registration requests(REG_REQ)
+    # this wires the request-reply registration flow into server transport system
     def handle_registration_packet(connection_id, packet):
         return registration_service.handle_registration_request(
             packet,
             server_crypto_service,
             enrollment_repository
         )
-
+    # handles incoming authentication start request (AUTH_REQ)
+    # the first half of the challenge-response request
     def handle_authentication_request_packet(connection_id, packet):
         return authentication_service.handle_authentication_request(
             packet,
@@ -3185,7 +3181,8 @@ def setup_server():
             enrollment_repository,
             server_session_manager
         )
-
+    # handles the client's authentication response (AUTH_RESP) and complete the server
+    # side authentication flow
     def handle_authentication_response_packet(connection_id, packet):
         authentication_service.current_connection_id = connection_id
 
@@ -3217,7 +3214,7 @@ def setup_server():
         )
         authentication_service.current_authentication_result = auth_result
 
-        # 4. Protect result (encrypt + sign), optionally including channel keys
+        # 4. Protect result (encrypt + sign)
         protected_message = authentication_service.protect_authentication_result(
             server_crypto_service,
             enrollment_repository,
@@ -3235,7 +3232,7 @@ def setup_server():
             )
 
         return protected_message
-
+    # handles incoming chat packets (MSG_SEND) from authenticated clients
     def handle_secure_message_packet(connection_id, packet):
         sender_session_info = server_session_manager.get_session_by_identifier(connection_id)
 
@@ -3265,7 +3262,7 @@ def setup_server():
         )
 
         return relay_result
-
+    # This handles intentional disconnect messages (DISCONNECT)
     def handle_disconnect_packet(connection_id, packet):
         print(f"Disconnect requested from {connection_id}: {packet.reason if packet else 'No reason'}")
 
@@ -3281,7 +3278,7 @@ def setup_server():
 
         return None
 
-
+    # server's message dispatch table
     server_transport_manager.register_transport_handlers({
         MessageType.REG_REQ: handle_registration_packet,
         MessageType.AUTH_REQ:handle_authentication_request_packet,
@@ -3291,7 +3288,7 @@ def setup_server():
 
 
     })
-
+    #return the main components to server GUI
     return (server_transport_manager,
             registration_service,
             server_crypto_service,
