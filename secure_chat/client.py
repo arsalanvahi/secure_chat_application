@@ -1,4 +1,12 @@
+##################################################
 #client.py
+#the code is organized in layered architecture:
+#1.Client GUI / Presentation Layer
+#2-Application/Workflow Layer
+#3-Transport/Protocol Layer
+#4-Security Layer
+#5-Runtime State/observability Layer
+####################################################
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext,filedialog
 
@@ -17,6 +25,7 @@ from Crypto.Hash import SHA3_512
 from Crypto.PublicKey import RSA
 import hashlib
 
+#dataclass decorator which is used to quickly create classes that mainly stores data
 from dataclasses import dataclass
 
 # =========================================
@@ -47,6 +56,13 @@ from server import (
     recv_framed
 
 )
+
+# =========================================
+#  client-side data structures
+# =========================================
+
+# stores the client_side connection configuration together with readiness flags
+# we use these in different workflows. We mostly use it in ClientRuntimeState
 @dataclass
 class ConnectionSettings:
     server_ip:str
@@ -56,6 +72,8 @@ class ConnectionSettings:
     readiness_for_authentication:bool=False
     readiness_for_reconnect:bool=False
 
+# stores the raw registration information entered by the client before
+# the secure processing happens
 @dataclass
 class RegistrationInput:
     server_ip:str
@@ -64,12 +82,15 @@ class RegistrationInput:
     password:str
     selected_channel:ChannelName
 
-
+# a data container that stores the raw authentication/log in information
+# entered by the user on the client-side (very beginning of the process)
 @dataclass
 class AuthenticationInput:
     username:str
     password:str
 
+# a data container which represents the parsed form of an incoming
+# secure chat packet on the client side.
 @dataclass
 class IncomingMessage:
     packet:SecureMessagePacket | None
@@ -77,6 +98,9 @@ class IncomingMessage:
     hmac_value: bytes | None
     packet_valid: bool = False
 
+
+# a data container which stores the outcome of verifying an incoming secure
+# message packet
 @dataclass
 class VerificationResult:
     success:bool
@@ -84,6 +108,8 @@ class VerificationResult:
     error:str
     ciphertext_valid: bool =False
 
+# the data container stores the outcome of decrypting an incoming secure message
+#  after the packet already passed the integrity verification
 @dataclass
 class DecryptionResult:
     success: bool
@@ -94,11 +120,13 @@ class DecryptionResult:
 
 
 
-
+# =========================================
+# 1. Client GUI / Presentation Layer
+# =========================================
 
 
 # =========================================
-# 1. Client GUI / Presentation
+#
 # =========================================
 class ClientGUI:
     def __init__(self, root):
@@ -109,19 +137,6 @@ class ClientGUI:
 
         self.app = ClientAppCoordinator()
 
-        # Load server public PEM files from code
-        #try:
-        #    self.app.client_crypto_service.load_server_public_keys_from_files(
-        #        "server_enc_dec_pub.pem",
-        #        "server_sign_verify_pub.pem"
-        #    )
-        #except Exception as error:
-        #    messagebox.showerror(
-        #       "Key Load Error",
-        #       f"Failed to load server public key files:\n{error}"
-        #    )
-
-        #load from GUI
         self.enc_pub_path_var = tk.StringVar(value=str(BASE_DIR / "server_enc_dec_pub.pem"))
         self.sign_pub_path_var = tk.StringVar(value=str(BASE_DIR / "server_sign_verify_pub.pem"))
 
@@ -900,8 +915,14 @@ class RegistrationController:
 
 
 
+# =========================================
+# 2-Application/ Workflow Layer
+# =========================================
 
 
+# =========================================
+#
+# =========================================
 class AuthenticationController:
     def __init__(self):
         self.pending_username = None
@@ -1602,6 +1623,10 @@ class DisconnectController:
 # =========================================
 # 3. Transport/Protocol Layer
 # =========================================
+
+# =========================================
+#
+# =========================================
 class ClientConnectionManager:
     def __init__(self):
         self.active_socket_handle = None
@@ -1763,7 +1788,11 @@ class ClientConnectionManager:
 
 
 # =========================================
-# 4. Security
+# 4. Security Layer
+# =========================================
+
+# =========================================
+#
 # =========================================
 class ClientCryptoService:
     def __init__(self):
@@ -1988,7 +2017,11 @@ class ClientCryptoService:
 
 
 # =========================================
-# 5. Runtime State / Observability
+# 5. Runtime State / Observability Layer
+# =========================================
+
+# =========================================
+# 
 # =========================================
 class ConnectionSettingsManager:
     def __init__(self):
