@@ -83,9 +83,7 @@ class AuthStatus(str,Enum): #protocol result contract
     CHANNEL_UNAVAILABLE = "CHANNEL_UNAVAILABLE"
 
 
-# Defines the communication channels supported by the secure chat application.
-# Each client subscribes to one of these channels during enrollment, and that
-# selection determines secure key distribution and message routing.
+# Defines the communication channels
 class ChannelName(str,Enum): #A shared protocol enum for Publish-Subscribe communication style
     IF100 = "IF100"
     MATH101 = "MATH101"
@@ -1581,16 +1579,23 @@ class AuthenticationService:
 
 
 
-
-
+# =========================================
+# Sever-side routing and broadcasting manager
+# Controls how how secure messages are routed from one authenticated client to
+# other client subscribed to the same channel. Its responsibilities include validating
+# whether the sender is allowed to send, determining which channel the sender belongs to,
+# resolving the correct recipients fot that channel, relaying the secure packet to those
+# recipients, and record whether the relay succeeded or not.
+# communication style: publish-subscribe
+# =========================================
 class MessageRelayService:
     last_relay_result: None
 
     def __init__(self):
-        self.current_relay_context = None
-        self.last_relay_result  = None
+        self.current_relay_context = None #RelayContext
+        self.last_relay_result  = None #RelayResult
         self.last_routing_error = None
-
+    #the methods checks whether the sender is allowed to send/receive message
     def validate_sender_for_routing(self,sender_connection_id, sender_session_info):
         if sender_connection_id is None:
             self.last_routing_error = "sender connection_id is missing"
@@ -1690,7 +1695,7 @@ class MessageRelayService:
         )
         return self.last_relay_result
 
-
+    #
     def resolve_channel_recipients(self,server_session_manager):
         if server_session_manager is None:
             self.last_routing_error = "server session manager is missing"
@@ -1956,13 +1961,23 @@ class MessageRelayService:
         pass
     def notify_traffic_monitor(self):
         pass
+
+# =========================================
+#it is responsible for the generation, storage, availability tracking,
+# retrieval, and cleanup of per-channel cryptographic key material.
+# Without this class, the server would have a clean way to generate
+# channel keys from master secrets, remember which channels are available,
+# distribute the correct key material after authentication, and clear the keys
+# when the server stops
+# =========================================
 class ChannelKeyManager:
     def __init__(self):
-        self.per_channel_aes_keys = {}
+        self.per_channel_aes_keys = {} #store AES keys
         self.per_channel_ivs = {}
         self.per_channel_hmac_keys = {}
-        self.channel_available_flags = ChannelAvailabilityState()
-        self.key_generation_status = False
+        self.channel_available_flags = ChannelAvailabilityState() #state object for channel availability
+        self.key_generation_status = False #flag to check whether the most recent generation attempt was successful
+    #check the request to generate keys is valid or not
     def validate_channel_key_generation_request(self,channel_name, master_secret):
         if channel_name is None:
             self.key_generation_status = False
@@ -1981,6 +1996,7 @@ class ChannelKeyManager:
             return False
         return True
 
+    #method that generates channel keys (main method)
     def generate_channel_keys(self,channel_name,master_secret,server_crypto_service):
         request_valid = self.validate_channel_key_generation_request(channel_name, master_secret)
         if not request_valid:
@@ -2007,12 +2023,11 @@ class ChannelKeyManager:
         self.mark_channel_available(channel_name)
         self.key_generation_status=True
 
-
         return key_set
 
 
 
-
+    #stores the generated keys in the internal state of the class
     def install_channel_keys(self,channel_name, key_set):
         if channel_name is None:
             return False
@@ -2024,7 +2039,7 @@ class ChannelKeyManager:
         return True
 
 
-
+    #returns the stored key set for a given channel
     def retrieve_channel_keys(self,channel_name):
         if channel_name is None:
             return None
@@ -2041,7 +2056,8 @@ class ChannelKeyManager:
             keys_loaded=True
         )
 
-
+    #returns whether the requested channel has valid runtime keys
+    #works based on ChannelAvailabiltyState
     def check_channel_availability(self,channel_name):
         if channel_name is None:
             return False
@@ -2055,7 +2071,8 @@ class ChannelKeyManager:
 
 
 
-
+    #set the availability flag of the given channel to True
+    #works based on ChannelAvailabilityState
     def mark_channel_available(self,channel_name):
         if channel_name ==ChannelName.IF100:
             self.channel_available_flags.if100_available = True
@@ -2064,6 +2081,7 @@ class ChannelKeyManager:
         elif channel_name == ChannelName.SPS101:
             self.channel_available_flags.sps101_available = True
 
+    #sets the availability of the given channel to False
     def mark_channel_unavailable(self,channel_name):
         if channel_name == ChannelName.IF100:
             self.channel_available_flags.if100_available = False
@@ -2071,7 +2089,7 @@ class ChannelKeyManager:
             self.channel_available_flags.math101_available = False
         elif channel_name == ChannelName.SPS101:
             self.channel_available_flags.sps101_available = False
-
+    #removes all stored runtime key materials and resets all channel availabilty flag
     def clear_channel_keys(self):
         self.per_channel_aes_keys.clear()
         self.per_channel_ivs.clear()
