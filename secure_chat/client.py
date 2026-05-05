@@ -638,7 +638,12 @@ class ClientGUI:
             self.sign_pub_path_var.set(path)
 
 # =========================================
-# 2. Application / Workflow Logic
+# 2. Application / Workflow Logic Layer
+# =========================================
+
+# =========================================
+#
+#
 # =========================================
 class ClientAppCoordinator:
     def __init__(self):
@@ -667,11 +672,6 @@ class ClientAppCoordinator:
 
         self.authentication_controller.channel_key_store = self.channel_key_store
         self.authentication_controller.client_session_manager = self.client_session_manager
-
-
-
-
-
 
 
     def start_connection_configuration(self):
@@ -767,7 +767,10 @@ class ClientAppCoordinator:
 
 
 
-
+# =========================================
+#
+#
+# =========================================
 
 
 class RegistrationController:
@@ -1143,7 +1146,10 @@ class AuthenticationController:
         self.last_authentication_error = None
         return True
 
-
+# =========================================
+#
+#
+# =========================================
 class SecureMessageSender:
     def __init__(self):
         self.current_outgoing_plaintext = None
@@ -1210,10 +1216,6 @@ class SecureMessageSender:
         self.last_send_result = None
         self.last_send_error = None
         return prepared_plaintext
-
-
-
-
 
     def secure_packet(self,prepared_plaintext, client_crypto_service):
         if not prepared_plaintext:
@@ -1321,6 +1323,12 @@ class SecureMessageSender:
             self.last_send_error = "secure message sending failed"
         self.last_send_result = "sending failure"
         return False
+
+
+# =========================================
+#
+#
+# =========================================
 class IncomingMessageProcessor:
     def __init__(self):
         self.current_incoming_packet = None
@@ -1332,11 +1340,6 @@ class IncomingMessageProcessor:
         self.channel_key_store = None
         self.client_session_manager = None
         self.client_crypto_service  = None
-
-
-
-
-
 
     def handle_incoming_packet(self,current_incoming_packet):
         self.receive_in_progress =  True
@@ -1382,10 +1385,6 @@ class IncomingMessageProcessor:
         return True
 
 
-
-
-
-
     def parse_secure_packet(self,current_incoming_packet):
         if current_incoming_packet is None:
             self.last_receive_error = "incoming packet is missing"
@@ -1424,11 +1423,7 @@ class IncomingMessageProcessor:
             self.last_receive_error = "channel keys are unavailable"
             return False
 
-
-
-
         return True
-
 
 
     def verify_incoming_packet(self,current_incoming_packet):
@@ -1625,18 +1620,20 @@ class DisconnectController:
 # =========================================
 
 # =========================================
-#
+# manages the client's network connection with the server
+# based on message type, different functions (handlers) are calling
 # =========================================
 class ClientConnectionManager:
     def __init__(self):
         self.active_socket_handle = None
         self.connection_state = False
         self.receive_loop_state = False
-        self.registered_packet_handler = {}
-        self.registered_disconnect_handler = []
-        self.remote_endpoint_info = None
-        self.current_incoming_message = None
-        self.current_outgoing_secure_packet = None
+        self.registered_packet_handler = {} # stores handlers for different incoming protocol message types
+        self.registered_disconnect_handler = [] #
+        self.remote_endpoint_info = None  # stores the server's address info ex. ("127.0.0.1",5000)
+        self.current_incoming_message = None #stores the temporary incoming messages
+        self.current_outgoing_secure_packet = None # stores the prepared message before sending
+    # creates a TCP socket and connects to the server
     def connect_to_server(self,server_ip,server_port):
         try:
             sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
@@ -1651,7 +1648,7 @@ class ClientConnectionManager:
             return False
 
 
-
+    # closes the active connections
     def disconnect_from_server(self,disconnect_message=None):
         if disconnect_message is not None and self.active_socket_handle is not None:
             try:
@@ -1667,19 +1664,22 @@ class ClientConnectionManager:
                 pass
         self.active_socket_handle = None
         self.connection_state = False
-
-
-
+    # a wrapper for sending a registration request
     def send_registration_request(self,request_message):
         return self.send_application_message(request_message)
+    # sends AUTH_REQ to the server
     def send_authentication_request(self,authentication_request_message):
         return self.send_application_message(authentication_request_message)
+
+    # validates the received message is actually an authenticated challenge
     def receive_authentication_challenge(self,authentication_challenge_message):
         if authentication_challenge_message is None:
             return None
         if authentication_challenge_message.message_type != MessageType.AUTH_CHALLENGE:
             return None
         return authentication_challenge_message
+
+    # sends the client's authentication response to the server
     def send_authentication_response(self,authentication_response_message):
         if authentication_response_message is None:
             return False
@@ -1687,6 +1687,7 @@ class ClientConnectionManager:
             return False
         return self.send_application_message(authentication_response_message)
 
+    # sends a previously prepared packet
     def send_secure_packet(self):
         if self.current_outgoing_secure_packet is None:
             return False
@@ -1700,7 +1701,7 @@ class ClientConnectionManager:
         return True
 
 
-
+    # starts a single receive cycle
     def start_receive_loop(self):
         if not self.connection_state:
             self.receive_loop_state = False
@@ -1723,19 +1724,23 @@ class ClientConnectionManager:
         self.receive_loop_state = False
         return True
 
-
+    # register's a handler function for a specific message type
     def register_incoming_packet_handler(self,message_type, handler):
         self.registered_packet_handler[message_type] = handler
+    # stores the function that should be called when disconnect detected
     def register_disconnect_handler(self,handler):
         self.registered_disconnect_handler.append(handler)
+    # returns current value of connection state
     def report_connection_state(self):
         return self.connection_state
+    # marks a session as open
     def open_session(self):
         self.connection_state = True
+    # marks a session as closed and clear active socket
     def close_session(self):
         self.connection_state = False
         self.active_socket_handle = None
-
+    # sending valid protocol message to the server (main method of the transport methods)
     def send_application_message(self, message):
         if self.active_socket_handle is None:
             return False
@@ -1750,7 +1755,7 @@ class ClientConnectionManager:
         except Exception:
             self.connection_state = False
             return False
-
+    # main method for receiving
     def receive_application_message(self):
         if self.active_socket_handle is None:
             if not self.connection_state:
@@ -1779,9 +1784,10 @@ class ClientConnectionManager:
             self.connection_state = False
             return None
 
-
+    # using to allow other components to check the connection has been lost or not
     def detect_connection_loss(self):
         return not self.connection_state
+    # calls all registered disconnect handlers
     def notify_disconnect(self):
         for handle in self.registered_disconnect_handler:
             handle()
