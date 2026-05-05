@@ -1348,14 +1348,16 @@ class RegistrationService:
         )
 
 # =========================================
-
+# server-side providing authentication service
+# using challenge-response authentication protocol
 # =========================================
 class AuthenticationService:
     def __init__(self):
-        self.current_authentication_request_context = None
-        self.current_challenge = None
-        self.current_authentication_result = None
+        self.current_authentication_request_context = None #stores the current authentication request using AuthenticationRequestMessage
+        self.current_challenge = None #stores the current challenge
+        self.current_authentication_result = None #stores authentication result using AuthenticationResult data container
         self.last_authentication_error = None
+    #first server-side step of doing authentication
     def handle_authentication_request(self, request_message, server_crypto_service,enrollment_repository, server_session_manager):
         self.last_authentication_error = None
         self.current_authentication_request_context = request_message
@@ -1375,6 +1377,7 @@ class AuthenticationService:
 
         )
 
+    #checks whether the user even allowed to authentication or not
     def validate_authentication_eligibility(self,username,enrollment_repository,server_session_manager):
         if not enrollment_repository.check_whether_username_exists(username):
             self.last_authentication_error = "Username is not enrolled"
@@ -1383,12 +1386,14 @@ class AuthenticationService:
             self.last_authentication_error = "same user name already active"
             return False
         return True
+    #asks the CryptoService to generate fresh random authentication challenge
     def generate_authentication_challenge(self,server_crypto_service):
 
         return server_crypto_service.generate_secure_challenge()
-
+    #Only passes (separation of generate challenge and send challenge workflows)
     def send_authentication_challenge(self,authentication_challenge):
         return authentication_challenge
+    #validating that the received message is a authentication resposne (AUTH-RESP)
     def receive_authentication_response(self,authentication_response_message):
         if authentication_response_message is None:
             return None
@@ -1396,7 +1401,7 @@ class AuthenticationService:
             return None
         return authentication_response_message
 
-
+    #verifies whether the client's HMAC matches with what the server expects
     def verify_authentication_response(self,authentication_response_message,server_crypto_service,enrollment_repository):
         if authentication_response_message is None:
             self.last_authentication_error = "authentication response is missing"
@@ -1430,7 +1435,7 @@ class AuthenticationService:
             self.last_authentication_error = "Authentication Response verification failed"
             return False
         return True
-
+    #just calling a method and stores a boolean flag to value current_authentication_result state
     def determine_authentication_outcome(self,authentication_response_message,server_crypto_service,enrollment_repository):
         authentication_success = self.verify_authentication_response(
             authentication_response_message,
@@ -1440,10 +1445,7 @@ class AuthenticationService:
         self.current_authentication_result = authentication_success
         return authentication_success
 
-
-
-
-
+    #creating AuthenticationResult data container
     def build_authentication_result(self,authentication_success,channel_key_set = None):
         if not authentication_success:
             return AuthenticationResult(
@@ -1470,7 +1472,7 @@ class AuthenticationService:
 
 
 
-
+    #creating final authentication response in order to send to the client
     def protect_authentication_result(self, server_crypto_service, enrollment_repository, channel_key_set=None):
 
         if self.current_authentication_result is None:
@@ -1531,10 +1533,9 @@ class AuthenticationService:
             signature=signature
 
         )
-
-
-
-
+    #activate the user's authenticated session on the server after successful authentication
+    # the sever has now updates its internal session state so this connection is officially treated as
+    # a log-in user
     def activate_authenticated_session(self,server_session_manager,enrollment_repository):
         if self.current_authentication_result is None:
             self.last_authentication_error = "Authentication result missing"
@@ -1575,11 +1576,7 @@ class AuthenticationService:
                 connected_client_info
             )
         return True
-
-
-
-
-
+    #validation of the outgoing message is authentication result message
     def send_authentication_result(self,authentication_result_message):
         if authentication_result_message is None:
             self.last_authentication_error = "Authentication result message is failing"
@@ -2671,6 +2668,10 @@ class ServerLifecycleManager:
 
 # =========================================
 # 4. Security Layer
+# =========================================
+
+#=========================================
+#
 # =========================================
 class ServerCryptoService:
     def __init__(self):
