@@ -2836,45 +2836,50 @@ class ServerCryptoService:
 # =========================================
 
 #=========================================
-#
+# manages who is connected and authenticated and their channel memberships
+# It manages runtime session state of connected clients. It's responsibility
+# includes tracking who are active clients, authenticated sessions, online
+# usernames, mapping between connection and username, and which clients belongs
+# to which channels.
 # =========================================
 class ServerSessionManager:
     def __init__(self):
-        self.active_connections = {}
-        self.authenticated_sessions = set()
-        self.online_users = set()
-        self.username_to_session_mapping = {}
-        self.connection_to_user_mapping = {}
+        self.active_connections = {} #mapping connection_id to ServerSessionInfo (main session state)
+        self.authenticated_sessions = set() #a set of authenticated users
+        self.online_users = set() # a set of users that are currently active (duplicate login prevention)
+        self.username_to_session_mapping = {} #mapping username to connection_id
+        self.connection_to_user_mapping = {} #mapping connection_id to username
         self.channel_participants = {
             ChannelName.IF100:set(),
             ChannelName.MATH101:set(),
             ChannelName.SPS101:set()
         }
+    #add new session into the server's runtime state
     def add_connections(self,server_session_info,connected_client_info):
         connection_id = server_session_info.connection_id
         username = server_session_info.username
         channel = server_session_info.channel
 
-        #track active connections
+        #active connections
         self.active_connections[connection_id] = server_session_info
 
-        #track online user
+        #online user
         if username is not None:
             self.online_users.add(username)
             self.username_to_session_mapping[username] = connection_id
             self.connection_to_user_mapping[connection_id] = username
 
-        #track channel participants
+        #channel participants
         if channel is not None:
             if channel not in self.channel_participants:
                 self.channel_participants[channel] = set()
             self.channel_participants[channel].add(connection_id)
-        #track authentication session
+        #authentication session
         if server_session_info.authenticated:
             self.authenticated_sessions.add(connection_id)
 
 
-
+    #removes a connection and all related session state for disconnect handling and shutdown cleanup
     def remove_connections(self,connection_id):
         #removes a connection and all related runtime state.
         if connection_id is None:
@@ -2890,7 +2895,7 @@ class ServerSessionManager:
             if channel_set:
                 channel_set.discard(connection_id)
         return True
-
+    #associates an existing connection with a username
     def bind_connection_to_identity(self,connection_id:str,username:str):
         if connection_id is None or username is None:
             return False
@@ -2910,7 +2915,7 @@ class ServerSessionManager:
 
         return True
 
-
+    #marks a session as authenticated
     def mark_session_authenticated(self,connection_id):
         session_info = self.active_connections.get(connection_id)
         if session_info is None:
@@ -2918,8 +2923,10 @@ class ServerSessionManager:
         session_info.authenticated =True
         self.authenticated_sessions.add(connection_id)
         return True
+    #checking the username is already active
     def check_whether_username_is_active(self,username):
         return username in self.username_to_session_mapping
+    #returns the ServerSessionInfo for a given connection ID
     def get_session_by_identifier(self,connection_id):
 
         #retrieve the ServerSessionInfo for a given connection identifier
@@ -2927,7 +2934,7 @@ class ServerSessionManager:
             return None
         return self.active_connections.get(connection_id)
 
-
+    #returns a list of ConnectedClientInfo for all active connections
     def get_connected_clients(self):
         connected_clients = []
         for session_info in self.active_connections.values():
@@ -2940,7 +2947,7 @@ class ServerSessionManager:
             connected_clients.append(client_info)
         return connected_clients
 
-
+    #returns a list of ConnectedClientInfo only for authenticated sessions
     def get_authenticated_clients(self):
         authenticated_clients = []
         for connection_id in self.authenticated_sessions:
@@ -2956,7 +2963,7 @@ class ServerSessionManager:
             authenticated_clients.append(client_info)
 
         return authenticated_clients
-
+    #returns the connections ids of authenticated clients belong to the given channel
     def resolve_recipients_for_channel(self,channel):
         #Returns a list of connection_ids for authenticated clients subscribed to the
         #given channel
@@ -2973,7 +2980,7 @@ class ServerSessionManager:
         return recipients
 
 
-
+    #clear all runtime session state
     def clear_all_sessions(self):
         self.active_connections.clear()
         self.authenticated_sessions.clear()
@@ -2983,6 +2990,9 @@ class ServerSessionManager:
 
         for channel in self.channel_participants:
             self.channel_participants[channel].clear()
+
+
+
 
 class ServerRuntimeContext:
     def __init__(self):
