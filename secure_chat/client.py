@@ -1792,7 +1792,7 @@ class ClientConnectionManager:
 # =========================================
 
 # =========================================
-#
+# Cryptographic engine of the client
 # =========================================
 class ClientCryptoService:
     def __init__(self):
@@ -2021,7 +2021,8 @@ class ClientCryptoService:
 # =========================================
 
 # =========================================
-# 
+# its role is store, validate, and report the client's connection
+# configuration to the server (configuration manager)
 # =========================================
 class ConnectionSettingsManager:
     def __init__(self):
@@ -2031,6 +2032,8 @@ class ConnectionSettingsManager:
         self.readiness_for_registration = False
         self.readiness_for_authentication = False
         self.readiness_for_reconnect = False
+    # returns the current connection settings as a data container
+    # named ConnectionSettings
     def load_current_connection_settings(self):
         return ConnectionSettings(
             server_ip = self.server_ip,
@@ -2041,7 +2044,7 @@ class ConnectionSettingsManager:
             readiness_for_registration= self.readiness_for_registration,
 
         )
-
+    # checks whether the IP and port are valid or not
     def  validate_connection_settings(self):
         if self.server_ip == "":
             self.configuration_valid = False
@@ -2056,20 +2059,21 @@ class ConnectionSettingsManager:
         self.configuration_valid = True
         return True
 
-
+    #stores a new IP and Port
     def save_connection_settings(self,server_ip, server_port):
         self.server_ip = server_ip
         self.server_port  = server_port
         self.validate_connection_settings()
         self.determine_connection_readiness()
 
+    # update the current stored server IP and port
     def update_connection_settings(self,server_ip,server_port):
         self.server_ip = server_ip
         self.server_port = server_port
         self.validate_connection_settings()
         self.determine_connection_readiness()
 
-
+    # returns the current connections settings as a ConnectionSettings data container
     def  get_current_connection_settings(self):
         return ConnectionSettings(
             server_ip = self.server_ip,
@@ -2079,6 +2083,7 @@ class ConnectionSettingsManager:
             readiness_for_authentication = self.readiness_for_authentication,
             readiness_for_reconnect= self.readiness_for_reconnect,
         )
+    # determines whether the client is ready to perform a workflow
     def determine_connection_readiness(self):
         if self.configuration_valid:
             self.readiness_for_registration = True
@@ -2091,9 +2096,16 @@ class ConnectionSettingsManager:
         return False
 
 
+# =========================================
+# it tracks the current session state of the
+# the client. It maintains the client's current
+# operational state including whether the client
+# connected to the server, successfully authenticated,
+# and so
+# =========================================
 class ClientSessionManager:
     def __init__(self):
-        self.connected = False
+        self.connected = False #the client has an active session with the server
         self.authenticated = False
         self.channel_ready = False
         self.channel_unavailable = False
@@ -2101,31 +2113,36 @@ class ClientSessionManager:
         self.receive_ready = False
         self.current_username = None
         self.current_server_endpoint_summary = None
+    #when the connection, authentication, and channel readiness changes, this function calls
     def _refresh_readiness(self):
         self.send_ready = self.connected and self.authenticated and self.channel_ready
         self.receive_ready = self.connected and self.authenticated and self.channel_ready
-
+    #returns whether client connected to the server or not
     def get_connection_state(self):
         return self.connected
+    # update the connection state
     def set_connection_state(self,value):
         self.connected = value
         self._refresh_readiness()
-
+    # returns whether the clien is authenticated or not
     def get_authentication_state(self):
         return self.authenticated
+    # updates the authentication set
     def set_authentication_state(self,value):
         self.authenticated = value
         self._refresh_readiness()
-
+    # updates the channel is ready
     def set_channel_readiness(self,value):
         self.channel_ready = value
         self.channel_unavailable = not value
         self._refresh_readiness()
-
+    # returns whether the client is allowed to send
     def check_send_readiness(self):
         return self.send_ready
+    # returns whether the client is allowed to process and receive
     def check_receive_readiness(self):
         return self.receive_ready
+    # returns a dictionary containing the entire client session data
     def get_overall_session_state(self):
         return {
             "connected":self.connected,
@@ -2137,6 +2154,7 @@ class ClientSessionManager:
             "current_username":self.current_username,
             "current_server_endpoint_summary":self.current_server_endpoint_summary,
         }
+    # resets the client session to the initial inactive state
     def reset_session_state(self):
         self.connected = False
         self.authenticated = False
@@ -2146,8 +2164,16 @@ class ClientSessionManager:
         self.receive_ready = False
         self.current_username = None
         self.current_server_endpoint_summary = None
+
+    # reserved for further
     def notify_state_change(self):
         pass
+
+
+# =========================================
+# its role is acting as temporary in-memory
+# storage component
+# =========================================
 
 class ChannelKeyStore:
     def __init__(self):
@@ -2155,12 +2181,13 @@ class ChannelKeyStore:
         self.iv = None
         self.hmac_key = None
         self.keys_loaded = False
+    # stores the channel key material received from the server
     def store_channel_keys(self,key_set):
         self.aes_key = key_set.aes_key
         self.iv = key_set.iv
         self.hmac_key = key_set.hmac_key
         self.keys_loaded =  key_set.keys_loaded
-
+    # returns the channel key material as a ChannelKeySet data container
     def retrieve_channel_keys(self):#output from this method
         if not self.keys_loaded:
             return None
@@ -2171,9 +2198,10 @@ class ChannelKeyStore:
             keys_loaded=self.keys_loaded,
 
         )
-
+    # checks whether channel keys are currently available
     def check_key_availability(self):
         return self.keys_loaded
+    # removes all stored channel keys from the memory
     def clear_channel_keys(self):
         self.aes_key = None
         self.iv = None
