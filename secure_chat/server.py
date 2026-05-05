@@ -3052,15 +3052,25 @@ class ServerRuntimeContext:
 # =========================================
 # 6. Persistence Layer
 # =========================================
+
+
+# =========================================
+# Responsible for permanent storage and retrival of enrolled user records
+# It handles creating table in SQLite, saving new user enrollment records,
+# checking whether a username already exists, retrieving the enrolled usernames,
+# and accessing the database
+# =========================================
 class EnrollmentRepository:
     def __init__(self,db_path="secure_chat.db"):
-        self.db_path = db_path
-        self.db_lock = threading.Lock()
-        self.persistent_store_handle= sqlite3.connect(self.db_path,check_same_thread=False)
-        self.initialize_schema()
+        self.db_path = db_path  #stores the path of database
+        self.db_lock = threading.Lock() #creates a threading lock
+        self.persistent_store_handle= sqlite3.connect(self.db_path,check_same_thread=False) #open SQLite connection
+        self.initialize_schema() #assures that the table exists
 
+    #creating table
     def initialize_schema(self):
-        with self.db_lock:
+        self.db_lock.acquire()
+        try:
             cursor = self.persistent_store_handle.cursor()
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS enrollments(
@@ -3070,11 +3080,14 @@ class EnrollmentRepository:
                 subscribed_channel TEXT NOT NULL)
                 """)
             self.persistent_store_handle.commit()
+        finally:
+            self.db_lock.release()
 
 
-
+    #save a new username in the table
     def save_enrollment_record(self,enrollment_record):
-        with self.db_lock:
+        self.db_lock.acquire()
+        try:
             cursor = self.persistent_store_handle.cursor()
             cursor.execute("""
             INSERT INTO enrollments(
@@ -3093,37 +3106,52 @@ class EnrollmentRepository:
 
             )
             self.persistent_store_handle.commit()
+        finally:
+            self.db_lock.release()
 
 
 
+    #loading a user's enrollment record from the data base
     def retrieve_enrollment_record_by_username(self,username):
-        with self.db_lock:
+        self.db_lock.acquire()
+        try:
             cursor = self.persistent_store_handle.cursor()
             cursor.execute("""
             SELECT username,password_hash,reversed_password_hash,subscribed_channel FROM enrollments WHERE username  = ?
                            """,(username,))
             row = cursor.fetchone()
-        if row is None:
-            return None
-        return EnrollmentRecord(
-            username= row[0],
-            password_hash=row[1],
-            reversed_password_hash=row[2],
-            subscribed_channel=ChannelName(row[3])
+            if row is None:
+                return None
+            return EnrollmentRecord(
+                username= row[0],
+                password_hash=row[1],
+                reversed_password_hash=row[2],
+                subscribed_channel=ChannelName(row[3])
         )
+        finally:
+            self.db_lock.release()
+
+    #close SQLite connection
     def close(self):
-        with self.db_lock:
+         self.db_lock.acquire()
+         try:
             self.persistent_store_handle.close()
+         finally:
+             self.db_lock.release()
 
 
+    #checking whether a username exists in the database
     def check_whether_username_exists(self,username):
-        with self.db_lock:
+        self.db_lock.acquire()
+        try:
             cursor = self.persistent_store_handle.cursor()
             cursor.execute("""
             SELECT 1
             FROM enrollments WHERE username = ?""",(username,))
             row = cursor.fetchone()
-        return row is not None
+            return row is not None
+        finally:
+            self.db_lock.release()
 
 #load from file
 # def load_rsa_keyset_from_pem_files(
