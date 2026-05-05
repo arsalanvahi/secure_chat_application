@@ -340,8 +340,6 @@ class ServerStatus: #lifecycle/monitoring/admin
 
 # AdminOperationalContext stores the state of a server-side administrative
 # workflow, such as starting or stopping the server or generating channel keys.
-# It records the requested operation, relevant parameters, permission flags,
-# progress state, and the latest result or error message.
 @dataclass
 class AdminOperationalContext: #lifecycle/monitoring/admin
     requested_operation:str # Name of the requested admin action
@@ -353,9 +351,9 @@ class AdminOperationalContext: #lifecycle/monitoring/admin
     last_operation_error:str=""
 
 # ServerLifecycleState stores the current lifecycle phase of the server.
-# It records whether startup or shutdown is in progress, whether the
-# server is running or listening, and keeps the latest lifecycle result
-# and error messages for status reporting and debugging.
+# It records  startup or shutdown is in progress or not, the
+# server is running or listening or not, and keeps the latest lifecycle result
+# and error messages
 @dataclass
 class ServerLifecycleState:  #lifecycle/monitoring/admin
     lifecycle_phase: str # Descriptive name of the current lifecycle phase
@@ -1048,11 +1046,22 @@ class ServerGUI:
 # =========================================
 # 2. Application / Service Logic Layer
 # =========================================
+
+
+
+
+# =========================================
+# administrative control layer of the server
+# it coordinates high-level sever management actions such as start server,
+# stop server, trigger channel keys, record admin actions
+# =========================================
 class ServerAppCoordinator:
     def __init__(self):
-        self.current_administrative_workflow_context = None
-        self.pending_admin_operation = None
-        self.last_admin_action_result = None
+        self.current_administrative_workflow_context = None #current admin operation
+        self.pending_admin_operation = None #name of the operation that should happen next
+        self.last_admin_action_result = None  #store the summary of the recent admin action
+    #handles admin requests to start the server
+    #the result is recorded in AdminOperationalContext
     def start_server(self,port):
         if port is None:
             self.current_administrative_workflow_context = AdminOperationalContext(
@@ -1121,9 +1130,8 @@ class ServerAppCoordinator:
             message="server startup in progress",
             error=""
         )
+    #handles admin request to stop the server
     def stop_server(self):
-
-
         self.current_administrative_workflow_context = AdminOperationalContext(
             requested_operation="stop server",
             requested_port=None,
@@ -1148,6 +1156,7 @@ class ServerAppCoordinator:
             error=""
 
         )
+    #handles channel key generation
     def trigger_channel_key_generation(
             self,
             channel_name,
@@ -1228,21 +1237,29 @@ class ServerAppCoordinator:
 
 
 
-
+    #additional feature
     def open_connected_clients_monitor(self):
         pass
+    #additional feature
     def open_channel_traffic_monitor(self):
         pass
+    #additional feature
     def get_server_status(self):
         pass
 
-
+# =========================================
+# handles server-side registration (enrollment) workflow
+# it is responsible for server-side processing of a client_enrollment
+# request.
+# =========================================
 class RegistrationService:
     def __init__(self):
-        self.current_registration_request_context = None
-        self.current_decrypted_registration_payload = None
-        self.last_registration_result = None
-        self.last_registration_error = None
+        self.current_registration_request_context = None #stores registration context
+        self.current_decrypted_registration_payload = None #stores the last decrypted payload using RegistrationPayload
+        self.last_registration_result = None #stores the last registration result using RegistrationResult
+        self.last_registration_error = None #if error pops up, stores the error
+
+    #main registration method
     def handle_registration_request(self,request_message,server_crypto_service,enrollment_repository):
         payload = self.decrypt_registration_payload(request_message.encrypted_payload,server_crypto_service)
         if not self.validate_registration_payload(payload):
@@ -1259,19 +1276,12 @@ class RegistrationService:
         result = self.create_registration_result(True,"Registration Completed Successfully")
         signature = self.sign_registration_result(result,server_crypto_service)
         return self.send_registration_response(result,signature)
-
-
-
-
-
-
-
+    #decrypting the RSA-encrypted registration request that has been sent by the client
     def decrypt_registration_payload(self,encrypted_payload,crypto_service):
         payload = crypto_service.decrypt_registration_payload(encrypted_payload)
         self.current_decrypted_registration_payload = payload
         return payload
-
-
+    #checks if the decrypted data is acceptable
     def validate_registration_payload(self,payload):
         if payload is None:
             self.last_registration_error = "Registration payload is missing"
@@ -1289,12 +1299,11 @@ class RegistrationService:
             self.last_registration_error = "selected channel is empty"
             return False
         return True
-
-
-
+    #checks if the repository whether the username already exists (unique username)
     def check_username_availability(self,username,enrollment_repository):
         return not enrollment_repository.check_whether_username_exists(username)
-
+    #if the username is available and the payload is valid, converting payload into an
+    #EnrollmentRecord and store it in the database
     def save_enrollment_record(self,payload,enrollment_repository):
         record = EnrollmentRecord(
             username= payload.username,
@@ -1305,6 +1314,7 @@ class RegistrationService:
         enrollment_repository.save_enrollment_record(record)
         return record
 
+    #creating a successful RegistrationResult data container
     def create_registration_result(self,success,message):
         result = RegistrationResult(
             success=success,
@@ -1313,7 +1323,7 @@ class RegistrationService:
         )
         self.last_registration_result = result
         return result
-
+    #singing the registration result so that the client can verify the response
     def sign_registration_result(self,registration_result,server_crypto_service):
         result_text= (
             f"{registration_result.success}|"
@@ -1325,6 +1335,8 @@ class RegistrationService:
 
         return server_crypto_service.sign_response(result_bytes)
 
+    #creating the final registration response (using the data container RegistrationResponseMesage) and will
+    # return to transport layer to send to the client
     def send_registration_response(self,result,signature):
         result_code = "SUCCESS" if result.success else "FAILURE"
         return RegistrationResponseMessage(
@@ -1335,9 +1347,9 @@ class RegistrationService:
 
         )
 
+# =========================================
 
-
-
+# =========================================
 class AuthenticationService:
     def __init__(self):
         self.current_authentication_request_context = None
