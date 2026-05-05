@@ -2671,15 +2671,15 @@ class ServerLifecycleManager:
 # =========================================
 
 #=========================================
-#
+# server-side cryptographic engine
 # =========================================
 class ServerCryptoService:
     def __init__(self):
-        self.loaded_rsa_encryption_key_pair = None
-        self.loaded_rsa_signing_key_pair = None
-        self.key_validity_status = False
-        self.crypto_readiness_status = False
-
+        self.loaded_rsa_encryption_key_pair = None # a dictionary containing encryption_public_key and decryption_private_key
+        self.loaded_rsa_signing_key_pair = None # a dictionary containing signing_private_key and verification_public_key
+        self.key_validity_status = False # a flag showing RSA keys are valid or not
+        self.crypto_readiness_status = False # a flag to show that cryptoservice is ready or not
+    #loads the RSA key materials from RsaKeySet data container
     def load_rsa_keys(self,rsa_key_set):
         self.loaded_rsa_encryption_key_pair = {
             "encryption_public_key":rsa_key_set.encryption_public_key,
@@ -2697,7 +2697,7 @@ class ServerCryptoService:
         self.key_validity_status = rsa_key_set.validity_status
 
 
-
+    #checks the RSA keys are loaded or not
     def validate_rsa_keys(self):
         if self.loaded_rsa_encryption_key_pair is None:
             self.key_validity_status = False
@@ -2710,7 +2710,7 @@ class ServerCryptoService:
         self.key_validity_status = True
         self.crypto_readiness_status = True
         return True
-
+    #decrypts the incoming RSA-encrypted registration payload and reconstructs RegistrationPayload
     def decrypt_registration_payload(self, encrypted_registration_payload):
         if encrypted_registration_payload is None:
             return None
@@ -2743,14 +2743,10 @@ class ServerCryptoService:
 
         except Exception:
             return None
-
-
-
-
-
+    #generates 16-bit random challenge
     def generate_secure_challenge(self):
         return secrets.token_bytes(16)
-
+    #verifies the HMAC response matches the expected value
     def verify_challenge_response(self,received_hmac_response,challenge,stored_password_hash):
         if received_hmac_response is None:
             return False
@@ -2761,9 +2757,7 @@ class ServerCryptoService:
         expected_key = stored_password_hash[32:]
         expected_hmac_response = hmac.new(expected_key,challenge,hashlib.sha3_512).digest()
         return hmac.compare_digest(received_hmac_response,expected_hmac_response)
-
-
-
+    #derive AES key and IV and store isn DerivedResponseProtectedMaterial data conainer
     def derive_response_protection_material(self,stored_reversed_password_hash):
         if stored_reversed_password_hash is None:
             return None
@@ -2776,7 +2770,7 @@ class ServerCryptoService:
         return derived_response_protection_material
 
 
-
+    #encrypts the plaintext authentication result using AES
     def encrypt_authentication_result(self,derived_response_protection_material,authentication_result,channel_key_set=None):
         if authentication_result is None:
             return None
@@ -2797,7 +2791,7 @@ class ServerCryptoService:
         )
         return ciphertext
 
-
+    #signing the given data using server's RSA signing
     def sign_response(self,data:bytes) ->bytes:
         if data is None:
             return None
@@ -2808,7 +2802,7 @@ class ServerCryptoService:
         h = SHA3_512.new(data)
         signature = pkcs1_15.new(private_key).sign(h)
         return signature
-
+    #derive per-channel secure communication key materials from the server-entered master key
     def derive_channel_key_material(self,master_key):
         if master_key is None:
             return None
@@ -2839,6 +2833,10 @@ class ServerCryptoService:
 
 # =========================================
 # 5. Runtime State Layer
+# =========================================
+
+#=========================================
+#
 # =========================================
 class ServerSessionManager:
     def __init__(self):
