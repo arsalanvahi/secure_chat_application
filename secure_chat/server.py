@@ -1,4 +1,12 @@
+###########################################
+# Author : Arsalan Vahi (arsalan.vahi2009@gmail.com)
+#                       (arsalan.vahi@sabanciuniv.edu)
+# Description : secure client-server chat application developed
+# through software engineering process
 ##################################################
+
+
+
 #server.py
 #the code is organized in layered architecture:
 #1.Server GUI / Presentation Layer
