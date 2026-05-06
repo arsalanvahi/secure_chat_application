@@ -1147,18 +1147,21 @@ class AuthenticationController:
         return True
 
 # =========================================
-#
-#
+# responsibility is to coordinate the outgoing secure
+# message workflow
+# Can the client send message right now, and how do we transform
+# the plaintext into the secure packet?
 # =========================================
 class SecureMessageSender:
     def __init__(self):
         self.current_outgoing_plaintext = None
-        self.current_protected_packet = None
-        self.send_in_progress = False
+        self.current_protected_packet = None # stores the final secure packet
+        self.send_in_progress = False # Is the sending workflow in progress
         self.last_send_result = None
         self.last_send_error = None
         self.channel_key_store = None
         self.last_send_event  = None
+    # checks whether the  client is currently allowed to send secure message or not?
     def validate_send_readiness(self,session_manager):
         if session_manager is None:
             self.last_send_error = "session manager is not available"
@@ -1183,7 +1186,7 @@ class SecureMessageSender:
         self.last_send_result = None
         self.last_send_error = None
         return True
-
+    # checks whether the outgoing message is valid
     def validate_message_content(self):
         if self.current_outgoing_plaintext is None:
             self.last_send_result = "sending failure"
@@ -1200,7 +1203,7 @@ class SecureMessageSender:
         self.last_send_result = None
         self.last_send_error = None
         return True
-
+    # prepares the message before encryption
     def prepare_outgoing_plaintext(self):
         if not self.validate_message_content():
             self.last_send_result = "sending failure"
@@ -1216,7 +1219,7 @@ class SecureMessageSender:
         self.last_send_result = None
         self.last_send_error = None
         return prepared_plaintext
-
+    # convert plaintext into a protected SecureMessagePacket
     def secure_packet(self,prepared_plaintext, client_crypto_service):
         if not prepared_plaintext:
             self.last_send_result = "sending failure"
@@ -1259,11 +1262,9 @@ class SecureMessageSender:
             hmac=hmac_value
         )
         self.current_protected_packet = secure_packet
-
-
         return secure_packet
 
-
+    # sends the prepared secure packet to the server
     def send_secure_message(self,client_connection_manager):
         if client_connection_manager is None:
             self.last_send_result = "sending failure"
@@ -1282,7 +1283,7 @@ class SecureMessageSender:
         self.last_send_result = "secure message sent successfully"
         self.last_send_error = None
         return True
-
+    # creates a collection to offer observability
     def record_send_event(self):
         if self.current_protected_packet is None:
             self.last_send_result = "sending failure"
@@ -1305,7 +1306,7 @@ class SecureMessageSender:
         return event
 
 
-
+    # the method records that the send operation completed successfully.
     def report_send_success(self):
         if self.current_protected_packet is None:
             self.last_send_result = "sending failure"
@@ -1316,7 +1317,7 @@ class SecureMessageSender:
         self.send_in_progress = False
         return True
 
-
+    # handles the failure case
     def handle_send_failure(self):
         self.send_in_progress = False
         if self.last_send_error is None:
@@ -1326,21 +1327,22 @@ class SecureMessageSender:
 
 
 # =========================================
-#
-#
+# Processing secure incoming messages
+# Is the arriving message from server valid?
 # =========================================
 class IncomingMessageProcessor:
     def __init__(self):
-        self.current_incoming_packet = None
-        self.current_verification_result = False
-        self.current_decryption_result = False
-        self.current_recovered_plaintext = None
+        self.current_incoming_packet = None # stores the current incoming packet
+        self.current_verification_result = False # stores the result of HMAC verification
+        self.current_decryption_result = False # stores the current decryption result
+        self.current_recovered_plaintext = None # stores the recovered plaintext
         self.receive_in_progress = False
         self.last_receive_error = None
-        self.channel_key_store = None
+        self.channel_key_store = None # references client's ChannelKeyStore
         self.client_session_manager = None
         self.client_crypto_service  = None
 
+    # full secure receive message flow
     def handle_incoming_packet(self,current_incoming_packet):
         self.receive_in_progress =  True
         self.last_receive_error = None
@@ -1349,7 +1351,7 @@ class IncomingMessageProcessor:
         self.current_decryption_result = None
         self.current_recovered_plaintext = None
 
-        if current_incoming_packet is None:
+        if current_incoming_packet is None: # check whether a packet exists
             self.last_receive_error = "incoming packet is missed"
             self.receive_in_progress = False
             return False
@@ -1384,7 +1386,7 @@ class IncomingMessageProcessor:
         self.receive_in_progress = False
         return True
 
-
+    # checks whether the packet has the correct structure
     def parse_secure_packet(self,current_incoming_packet):
         if current_incoming_packet is None:
             self.last_receive_error = "incoming packet is missing"
@@ -1407,6 +1409,7 @@ class IncomingMessageProcessor:
         self.current_incoming_packet =incoming_message
         return incoming_message
 
+    # checks whether the client is allowed to process incoming secure messages
     def validate_receive_readiness(self):
         if not hasattr(self,"client_session_manager") or self.client_session_manager is None:
             self.last_receive_error = "client session manager is not available"
@@ -1425,7 +1428,7 @@ class IncomingMessageProcessor:
 
         return True
 
-
+    # verifies the integrity and authenticity within the shared channel
     def verify_incoming_packet(self,current_incoming_packet):
         if current_incoming_packet is None:
             return VerificationResult(
@@ -1470,6 +1473,7 @@ class IncomingMessageProcessor:
             ciphertext_valid=True
         )
 
+    # decrypts the ciphertext after the packet has passed HMAC verification
     def decrypt_verified_packet(self,current_incoming_packet):
         if current_incoming_packet is None:
             return DecryptionResult(
@@ -1519,29 +1523,32 @@ class IncomingMessageProcessor:
             error = "",
             plaintext=plaintext
         )
-
-
-
-
+    # returns the recovered plaintext message
     def deliver_plaintext_message(self):
         if self.current_recovered_plaintext is None:
             self.last_receive_error = "No plaintext available to deliver"
             return None
         return self.current_recovered_plaintext
+    # rejects the current packet
     def reject_incoming_packet(self):
         self.current_recovered_plaintext = None
         return False
+    # record received error
     def record_receive_failure(self):
         if self.last_receive_error is None:
             self.last_receive_error = "incoming packet processing failure"
         return self.last_receive_error
 
+# =========================================
+# main role is the controlled shutdown of the client session
+# =========================================
 class DisconnectController:
     def __init__(self):
-        self.disconnect_in_progress = False
-        self.pending_cleanup_status = False
-        self.last_disconnect_result = None
+        self.disconnect_in_progress = False # Is disconnect workflow currently running
+        self.pending_cleanup_status = False # Is the clean up completed or still pending
+        self.last_disconnect_result = None # stores the last disconnect message
         self.last_disconnect_error = None
+    # initialize disconnect state (core main function)
     def start_disconnect(self,client_connection_manager, client_session_manager):
         self.disconnect_in_progress = True
         self.pending_cleanup_status = False
@@ -1570,16 +1577,13 @@ class DisconnectController:
             self.pending_cleanup_status = True
             self.last_disconnect_result = "Disconnect completed successfully"
             return True
-
-
-
         except Exception as error:
             self.last_disconnect_error = str(error)
             self.handle_disconnect_error()
             return False
 
 
-
+    # representing the step where the client should stop doing new work before disconnection
     def stop_further_activity(self):
         if not self.disconnect_in_progress:
             self.last_disconnect_error = "No disconnect operation in progress"
@@ -1587,6 +1591,7 @@ class DisconnectController:
         self.pending_cleanup_status = False
         self.last_disconnect_error = None
         return True
+    # cancellation of active workflows before disconnect
     def abort_in_progress_operations(self):
         if not self.disconnect_in_progress:
             self.last_disconnect_error = "No disconnect operation in progress"
@@ -1595,6 +1600,7 @@ class DisconnectController:
         self.last_disconnect_error = None
         self.last_disconnect_result = "In-progress operations aborted"
         return True
+    # closes the network connection to the server
     def close_active_connections(self,client_connection_manager):
         disconnect_message = DisconnectMessage(
             message_type=MessageType.DISCONNECT,
@@ -1602,14 +1608,16 @@ class DisconnectController:
             )
         client_connection_manager.disconnect_from_server(disconnect_message)
         return True
-
+    # clears all session information
     def clear_local_session_state(self,client_session_manager):
         client_session_manager.reset_session_state()
         return True
+    # completes the disconnect workflow
     def finalize_disconnect(self):
         self.disconnect_in_progress = False
         self.pending_cleanup_status = True
         return True
+    # handles failures during disconnect
     def handle_disconnect_error(self):
         self.disconnect_in_progress = False
         self.pending_cleanup_status = False
