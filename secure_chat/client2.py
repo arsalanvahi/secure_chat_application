@@ -1,4 +1,12 @@
-#client.py should be organized in this order
+##################################################
+#client.py
+#the code is organized in layered architecture:
+#1.Client GUI / Presentation Layer
+#2-Application/Workflow Layer
+#3-Transport/Protocol Layer
+#4-Security Layer
+#5-Runtime State/observability Layer
+####################################################
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext,filedialog
 
@@ -17,6 +25,7 @@ from Crypto.Hash import SHA3_512
 from Crypto.PublicKey import RSA
 import hashlib
 
+#dataclass decorator which is used to quickly create classes that mainly stores data
 from dataclasses import dataclass
 
 # =========================================
@@ -47,6 +56,13 @@ from server import (
     recv_framed
 
 )
+
+# =========================================
+#  client-side data structures
+# =========================================
+
+# stores the client_side connection configuration together with readiness flags
+# we use these in different workflows. We mostly use it in ClientRuntimeState
 @dataclass
 class ConnectionSettings:
     server_ip:str
@@ -56,6 +72,8 @@ class ConnectionSettings:
     readiness_for_authentication:bool=False
     readiness_for_reconnect:bool=False
 
+# stores the raw registration information entered by the client before
+# the secure processing happens
 @dataclass
 class RegistrationInput:
     server_ip:str
@@ -64,12 +82,15 @@ class RegistrationInput:
     password:str
     selected_channel:ChannelName
 
-
+# a data container that stores the raw authentication/log in information
+# entered by the user on the client-side (very beginning of the process)
 @dataclass
 class AuthenticationInput:
     username:str
     password:str
 
+# a data container which represents the parsed form of an incoming
+# secure chat packet on the client side.
 @dataclass
 class IncomingMessage:
     packet:SecureMessagePacket | None
@@ -77,6 +98,9 @@ class IncomingMessage:
     hmac_value: bytes | None
     packet_valid: bool = False
 
+
+# a data container which stores the outcome of verifying an incoming secure
+# message packet
 @dataclass
 class VerificationResult:
     success:bool
@@ -84,6 +108,8 @@ class VerificationResult:
     error:str
     ciphertext_valid: bool =False
 
+# the data container stores the outcome of decrypting an incoming secure message
+#  after the packet already passed the integrity verification
 @dataclass
 class DecryptionResult:
     success: bool
@@ -94,11 +120,13 @@ class DecryptionResult:
 
 
 
-
+# =========================================
+# 1. Client GUI / Presentation Layer
+# =========================================
 
 
 # =========================================
-# 1. Client GUI / Presentation
+#
 # =========================================
 class ClientGUI:
     def __init__(self, root):
@@ -109,19 +137,7 @@ class ClientGUI:
 
         self.app = ClientAppCoordinator()
 
-        # Load server public PEM files from code
-        #try:
-        #    self.app.client_crypto_service.load_server_public_keys_from_files(
-        #        "server_enc_dec_pub.pem",
-        #        "server_sign_verify_pub.pem"
-        #    )
-        #except Exception as error:
-        #    messagebox.showerror(
-        #       "Key Load Error",
-        #       f"Failed to load server public key files:\n{error}"
-        #    )
-
-        #load from GUI
+        # loading server's public key paths
         self.enc_pub_path_var = tk.StringVar(value=str(BASE_DIR / "server_enc_dec_pub.pem"))
         self.sign_pub_path_var = tk.StringVar(value=str(BASE_DIR / "server_sign_verify_pub.pem"))
 
@@ -137,9 +153,7 @@ class ClientGUI:
         main = ttk.Frame(self.root, padding=10)
         main.pack(fill="both", expand=True)
 
-        # -----------------------------
-        # Top status row
-        # -----------------------------
+        ######## Top bar section ##########
         top_bar = ttk.Frame(main)
         top_bar.pack(fill="x", pady=(0, 8))
 
@@ -148,9 +162,8 @@ class ClientGUI:
         self.status_var = tk.StringVar(value="Status: disconnected / not logged in")
         ttk.Label(top_bar, textvariable=self.status_var).pack(side="right")
 
-        # =================================================
-        # Server Public Keys
-        # =================================================
+
+        ########   public keys  #############
         keys_frame = ttk.LabelFrame(main, text="Server Public Keys", padding=12)
         keys_frame.pack(fill="x", pady=(0, 10))
 
@@ -166,9 +179,8 @@ class ClientGUI:
 
         keys_frame.columnconfigure(1, weight=1)
 
-        # =================================================
-        # Enrollment Section
-        # =================================================
+
+        ######## enrollment section ##########
         enroll_frame = ttk.LabelFrame(main, text="Enrollment", padding=12)
         enroll_frame.pack(fill="x", pady=(0, 10))
 
@@ -222,9 +234,8 @@ class ClientGUI:
         signup_bar.grid(row=1, column=0, columnspan=2, sticky="e", pady=(15, 0))
         ttk.Button(signup_bar, text="Sign up", command=self.sign_up).pack(side="right")
 
-        # =================================================
-        # Login / Chat Section
-        # =================================================
+
+        ######## login/chat  section ##########
         login_frame = ttk.LabelFrame(main, text="Log in", padding=12)
         login_frame.pack(fill="both", expand=True)
 
@@ -285,9 +296,10 @@ class ClientGUI:
 
         ttk.Button(action_row, text="Log out", command=self.log_out).pack(side="right")
         ttk.Button(action_row, text="log in", command=self.log_in).pack(side="right", padx=(8, 0))
-    # =====================================================
-    # Utility methods
-    # =====================================================
+
+    ####################################################
+    ####### client controllers #########################
+    ####################################################
     def set_status(self, text):
         self.status_var.set(f"Status: {text}")
 
@@ -303,9 +315,7 @@ class ClientGUI:
         except ValueError:
             return None
 
-    # =====================================================
-    # Enrollment
-    # =====================================================
+
     def sign_up(self):
         server_ip = self.enroll_ip_var.get().strip()
         server_port = self.get_int_port(self.enroll_port_var.get().strip())
@@ -380,9 +390,7 @@ class ClientGUI:
         except Exception as error:
             messagebox.showerror("Registration Exception", str(error))
 
-    # =====================================================
-    # Login
-    # =====================================================
+
     def log_in(self):
         server_ip = self.login_ip_var.get().strip()
         server_port = self.get_int_port(self.login_port_var.get().strip())
@@ -479,9 +487,7 @@ class ClientGUI:
         except Exception as error:
             messagebox.showerror("Authentication Exception", str(error))
 
-    # =====================================================
-    # Send message
-    # =====================================================
+
     def send_message(self):
         plaintext = self.message_var.get().strip()
         if not plaintext:
@@ -520,9 +526,7 @@ class ClientGUI:
         except Exception as error:
             messagebox.showerror("Send Exception", str(error))
 
-    # =====================================================
-    # Log out / Disconnect
-    # =====================================================
+
     def log_out(self):
         try:
             self.polling_active = False
@@ -532,9 +536,7 @@ class ClientGUI:
         except Exception as error:
             messagebox.showerror("Disconnect Error", str(error))
 
-    # =====================================================
-    # Poll incoming messages
-    # =====================================================
+
     def poll_incoming_messages(self):
         if not self.polling_active:
             return
@@ -577,9 +579,7 @@ class ClientGUI:
         if self.polling_active:
             self.root.after(200, self.poll_incoming_messages)
 
-    # =====================================================
-    # Window close
-    # =====================================================
+
     def on_close(self):
         try:
             self.log_out()
@@ -622,56 +622,68 @@ class ClientGUI:
         if path:
             self.sign_pub_path_var.set(path)
 
+
+
 # =========================================
-# 2. Application / Workflow Logic
+# 2. Application / Workflow Logic Layer
+# =========================================
+
+# =========================================
+# Central coordinator of the client application
+# main responsibilities:
+# 1.creating workflow components
+# 2.dependency wiring rule
 # =========================================
 class ClientAppCoordinator:
     def __init__(self):
-        self.active_workflow=None
-        self.pending_user_action=None
-        self.current_view_context=None
+        self.active_workflow=None # stores the workflow currently being used
+        self.pending_user_action=None # stores the name of an action waiting to be executed
+        self.current_view_context=None # stores which UI mode is active
 
+        # creating workflow components
+
+        # handles the signup workflow
         self.registration_controller = RegistrationController()
-        self.authentication_controller = AuthenticationController()
 
+        self.authentication_controller = AuthenticationController()
         self.client_connection_manager = ClientConnectionManager()
         self.client_session_manager = ClientSessionManager()
         self.disconnect_controller = DisconnectController()
         self.client_crypto_service = ClientCryptoService()
         self.channel_key_store = ChannelKeyStore()
         self.secure_message_sender = SecureMessageSender()
+        self.incoming_message_processor = IncomingMessageProcessor()
+        self.connection_settings_manager = ConnectionSettingsManager()
+
+        # dependency wiring rule
+
+        # this gives secure message sender access the channel keys
         self.secure_message_sender.channel_key_store = self.channel_key_store
 
-        self.incoming_message_processor = IncomingMessageProcessor()
         self.incoming_message_processor.channel_key_store = self.channel_key_store
         self.incoming_message_processor.client_session_manager = self.client_session_manager
         self.incoming_message_processor.client_crypto_service = self.client_crypto_service
-
-        self.connection_settings_manager = ConnectionSettingsManager()
-
-
         self.authentication_controller.channel_key_store = self.channel_key_store
         self.authentication_controller.client_session_manager = self.client_session_manager
 
-
-
-
-
-
-
+    # activates the connection configuration workflow
     def start_connection_configuration(self):
         self.active_workflow = self.connection_settings_manager
         self.current_view_context = "connection_configuration_mode"
         self.pending_user_action = None
         return self.connection_settings_manager.get_current_connection_settings()
+
+    # this method activates the registration workflow
     def start_registration_workflow(self):
         self.active_workflow = self.registration_controller
         self.current_view_context = "registration-mode"
         self.pending_user_action = None
+    # activates the authentication workflow
     def start_authentication_workflow(self):
         self.active_workflow = self.authentication_controller
         self.current_view_context = "authentication-mode"
         self.pending_user_action = None
+    # activates the send message sending workflow
     def start_secure_send_workflow(self):
         self.active_workflow = self.secure_message_sender
         self.current_view_context = "secure_send_mode"
@@ -684,11 +696,14 @@ class ClientAppCoordinator:
         pass
     def open_security_alert_view(self):
         pass
+    # starts the disconnect workflow and delegates to
+    # DisconnectController
     def request_disconnect(self):
         return self.disconnect_controller.start_disconnect(
             self.client_connection_manager,
             self.client_session_manager
         )
+    # routes a pending user action to the currently active workflow
     def route_user_action_to_target_workflow(self):
         if self.active_workflow is None:
             self.pending_user_action = None
@@ -743,24 +758,16 @@ class ClientAppCoordinator:
             return False
         return False
 
-
-
-
-
-
-
-
-
-
-
-
-
+# =========================================
+# manages the client-side enrollment workflow
+# =========================================
 class RegistrationController:
     def __init__(self):
-        self.pending_registration_input = None
-        self.registration_in_progress = False
-        self.last_registration_result = None
+        self.pending_registration_input = None # stores the current registration input /server ip server port and so.
+        self.registration_in_progress = False # indicates whether a registration workflow is currently active
+        self.last_registration_result = None # stores the latest registration result
         self.last_registration_error = None
+    # begins the registration workflow
     def start_registration(self,server_ip, server_port, username, password,selected_channel):
         self.pending_registration_input = RegistrationInput(
             server_ip = server_ip,
@@ -772,7 +779,7 @@ class RegistrationController:
         self.registration_in_progress = True
         self.last_registration_result = None
         self.last_registration_error = None
-
+    # checks whether registration input is valid or not
     def validate_registration_input(self):
         if self.pending_registration_input is None:
             self.last_registration_error = "No registration input provided"
@@ -789,7 +796,7 @@ class RegistrationController:
 
         return True
 
-
+    # converts the raw registration input into a secure registration payload
     def prepare_registration_payload(self,client_crypto_service):
         if self.pending_registration_input is None:
             self.last_registration_error = "No registration input valid"
@@ -803,9 +810,9 @@ class RegistrationController:
             reversed_password_hash=derived_values["reversed_password_hash"],
             selected_channel=self.pending_registration_input.selected_channel
 
-
         )
         return payload
+    # creates and sends the registration request
     def submit_registration_request(self,client_crypto_service, client_connection_manager):
         if not self.validate_registration_input():
             return None
@@ -821,6 +828,7 @@ class RegistrationController:
         client_connection_manager.send_registration_request(request_message)
         return request_message
 
+    # the method processes the server's registration response
     def handle_registration_response(self, response_message, client_crypto_service):
         if response_message is None:
             self.last_registration_error = "No Registration Response"
@@ -859,6 +867,7 @@ class RegistrationController:
         self.registration_in_progress = False
         return False
 
+    # finalize registration after a successful server response
     def complete_registration(self):
         if self.last_registration_result is None:
             self.last_registration_error = "Registration result is missing"
@@ -872,7 +881,7 @@ class RegistrationController:
         self.registration_in_progress = False
         self.last_registration_error = None
         return True
-
+    # prepares the controller for another registration attempt after a failed registration
     def retry_registration(self):
         if self.pending_registration_input is None:
             self.last_registration_error = "No registration input available for retry"
@@ -890,6 +899,7 @@ class RegistrationController:
         self.last_registration_result = None
         self.last_registration_error = None
         return True
+    # cancels the registration workflow
     def abort_registration(self):
         self.pending_registration_input = None
         self.registration_in_progress = False
@@ -900,16 +910,23 @@ class RegistrationController:
 
 
 
+# =========================================
+# 2-Application/ Workflow Layer
+# =========================================
 
 
+# =========================================
+# Manage the client-side authentication workflow
+# =========================================
 class AuthenticationController:
     def __init__(self):
-        self.pending_username = None
-        self.pending_authentication_input = None
-        self.authentication_in_progress = False
-        self.pending_challenge = None
-        self.last_authentication_result = None
-        self.last_authentication_error = None
+        self.pending_username = None # stores the username currently being authenticated
+        self.pending_authentication_input = None # stores the user's login input /username and password
+        self.authentication_in_progress = False # is authentication workflow is currently active
+        self.pending_challenge = None # stores the random challenge received from the server
+        self.last_authentication_result = None # stores the authentication result
+        self.last_authentication_error = None # stores the error
+    # starting authentication process
     def start_authentication(self,username,password):
         self.pending_username = username
         self.pending_authentication_input = AuthenticationInput(
@@ -920,7 +937,7 @@ class AuthenticationController:
         self.pending_challenge = None
         self.last_authentication_result = None
         self.last_authentication_error = None
-
+    # checks whether the user's login information is valid or not
     def validate_authentication_input(self):
         if self.pending_authentication_input is None:
             self.last_authentication_error = "No authentication input provided"
@@ -933,7 +950,7 @@ class AuthenticationController:
             return False
         return True
 
-
+    # creates the firs authentication process message
     def request_authentication(self):
         if not self.validate_authentication_input():
             return None
@@ -944,7 +961,7 @@ class AuthenticationController:
             message_type= MessageType.AUTH_REQ,
             username=self.pending_authentication_input.username
         )
-
+    # handles the server's random challenge
     def handle_authentication_challenge(self,authentication_challenge_message,client_crypto_service):
         self.last_authentication_error = None
         if authentication_challenge_message is None:
@@ -976,9 +993,7 @@ class AuthenticationController:
             message_type=MessageType.AUTH_RESP,
             hmac_response=hmac_response
         )
-
-
-
+    # process the server's final authentication result
     def handle_authentication_result(self,authentication_result_message,client_crypto_service):
         if authentication_result_message is None:
             self.last_authentication_error = "Authentication result message is missing"
@@ -1075,14 +1090,14 @@ class AuthenticationController:
         self.last_authentication_error = None
         return True
 
-
+    # finalizing the authentication workflow
     def complete_authentication(self):
         if self.last_authentication_result is None:
             self.last_authentication_error = "Authentication result is missing"
             self.authentication_in_progress = False
             return False
         if self.last_authentication_result.status != AuthStatus.SUCCESS:
-            self.last_authentication_error = "Authentication has not completed successfully (Missing Channel Keys"
+            self.last_authentication_error = "Authentication has not completed successfully (Missing Channel Keys)"
             self.authentication_in_progress = False
             return False
         self.pending_authentication_input = None
@@ -1090,7 +1105,7 @@ class AuthenticationController:
         self.authentication_in_progress = False
         self.last_authentication_error = None
         return True
-
+    # prepares the controller for another authentication attempt after failure
     def retry_authentication(self):
         if self.pending_authentication_input is None:
             self.last_authentication_error = "No authentication input available for entry"
@@ -1112,7 +1127,7 @@ class AuthenticationController:
         return True
 
 
-
+    # cancels the authentication workflow completely
     def abort_authentication(self):
         self.pending_username = None
         self.pending_authentication_input = None
@@ -1122,16 +1137,22 @@ class AuthenticationController:
         self.last_authentication_error = None
         return True
 
-
+# =========================================
+# responsibility is to coordinate the outgoing secure
+# message workflow
+# Can the client send message right now, and how do we transform
+# the plaintext into the secure packet?
+# =========================================
 class SecureMessageSender:
     def __init__(self):
         self.current_outgoing_plaintext = None
-        self.current_protected_packet = None
-        self.send_in_progress = False
+        self.current_protected_packet = None # stores the final secure packet
+        self.send_in_progress = False # Is the sending workflow in progress
         self.last_send_result = None
         self.last_send_error = None
         self.channel_key_store = None
         self.last_send_event  = None
+    # checks whether the  client is currently allowed to send secure message or not?
     def validate_send_readiness(self,session_manager):
         if session_manager is None:
             self.last_send_error = "session manager is not available"
@@ -1156,7 +1177,7 @@ class SecureMessageSender:
         self.last_send_result = None
         self.last_send_error = None
         return True
-
+    # checks whether the outgoing message is valid
     def validate_message_content(self):
         if self.current_outgoing_plaintext is None:
             self.last_send_result = "sending failure"
@@ -1173,7 +1194,7 @@ class SecureMessageSender:
         self.last_send_result = None
         self.last_send_error = None
         return True
-
+    # prepares the message before encryption
     def prepare_outgoing_plaintext(self):
         if not self.validate_message_content():
             self.last_send_result = "sending failure"
@@ -1189,11 +1210,7 @@ class SecureMessageSender:
         self.last_send_result = None
         self.last_send_error = None
         return prepared_plaintext
-
-
-
-
-
+    # convert plaintext into a protected SecureMessagePacket
     def secure_packet(self,prepared_plaintext, client_crypto_service):
         if not prepared_plaintext:
             self.last_send_result = "sending failure"
@@ -1236,11 +1253,9 @@ class SecureMessageSender:
             hmac=hmac_value
         )
         self.current_protected_packet = secure_packet
-
-
         return secure_packet
 
-
+    # sends the prepared secure packet to the server
     def send_secure_message(self,client_connection_manager):
         if client_connection_manager is None:
             self.last_send_result = "sending failure"
@@ -1259,7 +1274,7 @@ class SecureMessageSender:
         self.last_send_result = "secure message sent successfully"
         self.last_send_error = None
         return True
-
+    # creates a collection to offer observability
     def record_send_event(self):
         if self.current_protected_packet is None:
             self.last_send_result = "sending failure"
@@ -1282,7 +1297,7 @@ class SecureMessageSender:
         return event
 
 
-
+    # the method records that the send operation completed successfully.
     def report_send_success(self):
         if self.current_protected_packet is None:
             self.last_send_result = "sending failure"
@@ -1293,30 +1308,32 @@ class SecureMessageSender:
         self.send_in_progress = False
         return True
 
-
+    # handles the failure case
     def handle_send_failure(self):
         self.send_in_progress = False
         if self.last_send_error is None:
             self.last_send_error = "secure message sending failed"
         self.last_send_result = "sending failure"
         return False
+
+
+# =========================================
+# Processing secure incoming messages
+# Is the arriving message from server valid?
+# =========================================
 class IncomingMessageProcessor:
     def __init__(self):
-        self.current_incoming_packet = None
-        self.current_verification_result = False
-        self.current_decryption_result = False
-        self.current_recovered_plaintext = None
+        self.current_incoming_packet = None # stores the current incoming packet
+        self.current_verification_result = False # stores the result of HMAC verification
+        self.current_decryption_result = False # stores the current decryption result
+        self.current_recovered_plaintext = None # stores the recovered plaintext
         self.receive_in_progress = False
         self.last_receive_error = None
-        self.channel_key_store = None
+        self.channel_key_store = None # references client's ChannelKeyStore
         self.client_session_manager = None
         self.client_crypto_service  = None
 
-
-
-
-
-
+    # full secure receive message flow
     def handle_incoming_packet(self,current_incoming_packet):
         self.receive_in_progress =  True
         self.last_receive_error = None
@@ -1325,7 +1342,7 @@ class IncomingMessageProcessor:
         self.current_decryption_result = None
         self.current_recovered_plaintext = None
 
-        if current_incoming_packet is None:
+        if current_incoming_packet is None: # check whether a packet exists
             self.last_receive_error = "incoming packet is missed"
             self.receive_in_progress = False
             return False
@@ -1360,11 +1377,7 @@ class IncomingMessageProcessor:
         self.receive_in_progress = False
         return True
 
-
-
-
-
-
+    # checks whether the packet has the correct structure
     def parse_secure_packet(self,current_incoming_packet):
         if current_incoming_packet is None:
             self.last_receive_error = "incoming packet is missing"
@@ -1387,6 +1400,7 @@ class IncomingMessageProcessor:
         self.current_incoming_packet =incoming_message
         return incoming_message
 
+    # checks whether the client is allowed to process incoming secure messages
     def validate_receive_readiness(self):
         if not hasattr(self,"client_session_manager") or self.client_session_manager is None:
             self.last_receive_error = "client session manager is not available"
@@ -1403,13 +1417,9 @@ class IncomingMessageProcessor:
             self.last_receive_error = "channel keys are unavailable"
             return False
 
-
-
-
         return True
 
-
-
+    # verifies the integrity and authenticity within the shared channel
     def verify_incoming_packet(self,current_incoming_packet):
         if current_incoming_packet is None:
             return VerificationResult(
@@ -1454,6 +1464,7 @@ class IncomingMessageProcessor:
             ciphertext_valid=True
         )
 
+    # decrypts the ciphertext after the packet has passed HMAC verification
     def decrypt_verified_packet(self,current_incoming_packet):
         if current_incoming_packet is None:
             return DecryptionResult(
@@ -1503,29 +1514,32 @@ class IncomingMessageProcessor:
             error = "",
             plaintext=plaintext
         )
-
-
-
-
+    # returns the recovered plaintext message
     def deliver_plaintext_message(self):
         if self.current_recovered_plaintext is None:
             self.last_receive_error = "No plaintext available to deliver"
             return None
         return self.current_recovered_plaintext
+    # rejects the current packet
     def reject_incoming_packet(self):
         self.current_recovered_plaintext = None
         return False
+    # record received error
     def record_receive_failure(self):
         if self.last_receive_error is None:
             self.last_receive_error = "incoming packet processing failure"
         return self.last_receive_error
 
+# =========================================
+# main role is the controlled shutdown of the client session
+# =========================================
 class DisconnectController:
     def __init__(self):
-        self.disconnect_in_progress = False
-        self.pending_cleanup_status = False
-        self.last_disconnect_result = None
+        self.disconnect_in_progress = False # Is disconnect workflow currently running
+        self.pending_cleanup_status = False # Is the clean up completed or still pending
+        self.last_disconnect_result = None # stores the last disconnect message
         self.last_disconnect_error = None
+    # initialize disconnect state (core main function)
     def start_disconnect(self,client_connection_manager, client_session_manager):
         self.disconnect_in_progress = True
         self.pending_cleanup_status = False
@@ -1554,16 +1568,13 @@ class DisconnectController:
             self.pending_cleanup_status = True
             self.last_disconnect_result = "Disconnect completed successfully"
             return True
-
-
-
         except Exception as error:
             self.last_disconnect_error = str(error)
             self.handle_disconnect_error()
             return False
 
 
-
+    # representing the step where the client should stop doing new work before disconnection
     def stop_further_activity(self):
         if not self.disconnect_in_progress:
             self.last_disconnect_error = "No disconnect operation in progress"
@@ -1571,6 +1582,7 @@ class DisconnectController:
         self.pending_cleanup_status = False
         self.last_disconnect_error = None
         return True
+    # cancellation of active workflows before disconnect
     def abort_in_progress_operations(self):
         if not self.disconnect_in_progress:
             self.last_disconnect_error = "No disconnect operation in progress"
@@ -1579,6 +1591,7 @@ class DisconnectController:
         self.last_disconnect_error = None
         self.last_disconnect_result = "In-progress operations aborted"
         return True
+    # closes the network connection to the server
     def close_active_connections(self,client_connection_manager):
         disconnect_message = DisconnectMessage(
             message_type=MessageType.DISCONNECT,
@@ -1586,14 +1599,16 @@ class DisconnectController:
             )
         client_connection_manager.disconnect_from_server(disconnect_message)
         return True
-
+    # clears all session information
     def clear_local_session_state(self,client_session_manager):
         client_session_manager.reset_session_state()
         return True
+    # completes the disconnect workflow
     def finalize_disconnect(self):
         self.disconnect_in_progress = False
         self.pending_cleanup_status = True
         return True
+    # handles failures during disconnect
     def handle_disconnect_error(self):
         self.disconnect_in_progress = False
         self.pending_cleanup_status = False
@@ -1602,16 +1617,22 @@ class DisconnectController:
 # =========================================
 # 3. Transport/Protocol Layer
 # =========================================
+
+# =========================================
+# manages the client's network connection with the server
+# based on message type, different functions (handlers) are calling
+# =========================================
 class ClientConnectionManager:
     def __init__(self):
         self.active_socket_handle = None
         self.connection_state = False
         self.receive_loop_state = False
-        self.registered_packet_handler = {}
-        self.registered_disconnect_handler = []
-        self.remote_endpoint_info = None
-        self.current_incoming_message = None
-        self.current_outgoing_secure_packet = None
+        self.registered_packet_handler = {} # stores handlers for different incoming protocol message types
+        self.registered_disconnect_handler = [] #
+        self.remote_endpoint_info = None  # stores the server's address info ex. ("127.0.0.1",5000)
+        self.current_incoming_message = None #stores the temporary incoming messages
+        self.current_outgoing_secure_packet = None # stores the prepared message before sending
+    # creates a TCP socket and connects to the server
     def connect_to_server(self,server_ip,server_port):
         try:
             sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
@@ -1626,7 +1647,7 @@ class ClientConnectionManager:
             return False
 
 
-
+    # closes the active connections
     def disconnect_from_server(self,disconnect_message=None):
         if disconnect_message is not None and self.active_socket_handle is not None:
             try:
@@ -1642,19 +1663,22 @@ class ClientConnectionManager:
                 pass
         self.active_socket_handle = None
         self.connection_state = False
-
-
-
+    # a wrapper for sending a registration request
     def send_registration_request(self,request_message):
         return self.send_application_message(request_message)
+    # sends AUTH_REQ to the server
     def send_authentication_request(self,authentication_request_message):
         return self.send_application_message(authentication_request_message)
+
+    # validates the received message is actually an authenticated challenge
     def receive_authentication_challenge(self,authentication_challenge_message):
         if authentication_challenge_message is None:
             return None
         if authentication_challenge_message.message_type != MessageType.AUTH_CHALLENGE:
             return None
         return authentication_challenge_message
+
+    # sends the client's authentication response to the server
     def send_authentication_response(self,authentication_response_message):
         if authentication_response_message is None:
             return False
@@ -1662,6 +1686,7 @@ class ClientConnectionManager:
             return False
         return self.send_application_message(authentication_response_message)
 
+    # sends a previously prepared packet
     def send_secure_packet(self):
         if self.current_outgoing_secure_packet is None:
             return False
@@ -1675,7 +1700,7 @@ class ClientConnectionManager:
         return True
 
 
-
+    # starts a single receive cycle
     def start_receive_loop(self):
         if not self.connection_state:
             self.receive_loop_state = False
@@ -1698,19 +1723,23 @@ class ClientConnectionManager:
         self.receive_loop_state = False
         return True
 
-
+    # register's a handler function for a specific message type
     def register_incoming_packet_handler(self,message_type, handler):
         self.registered_packet_handler[message_type] = handler
+    # stores the function that should be called when disconnect detected
     def register_disconnect_handler(self,handler):
         self.registered_disconnect_handler.append(handler)
+    # returns current value of connection state
     def report_connection_state(self):
         return self.connection_state
+    # marks a session as open
     def open_session(self):
         self.connection_state = True
+    # marks a session as closed and clear active socket
     def close_session(self):
         self.connection_state = False
         self.active_socket_handle = None
-
+    # sending valid protocol message to the server (main method of the transport methods)
     def send_application_message(self, message):
         if self.active_socket_handle is None:
             return False
@@ -1725,7 +1754,7 @@ class ClientConnectionManager:
         except Exception:
             self.connection_state = False
             return False
-
+    # main method for receiving
     def receive_application_message(self):
         if self.active_socket_handle is None:
             if not self.connection_state:
@@ -1754,23 +1783,29 @@ class ClientConnectionManager:
             self.connection_state = False
             return None
 
-
+    # using to allow other components to check the connection has been lost or not
     def detect_connection_loss(self):
         return not self.connection_state
+    # calls all registered disconnect handlers
     def notify_disconnect(self):
         for handle in self.registered_disconnect_handler:
             handle()
 
 
 # =========================================
-# 4. Security
+# 4. Security Layer
+# =========================================
+
+# =========================================
+# Cryptographic engine of the client
 # =========================================
 class ClientCryptoService:
     def __init__(self):
-        self.server_encryption_public_keys = None
+        self.server_encryption_public_keys = None #stores the server's RSA public key
         self.server_signature_verification_public_keys = None
         self.crypto_readiness_status = False
 
+    # loads the server's public keys from the user-selected path
     def load_server_public_keys_from_paths(self, enc_pub_path, sign_pub_path):
         encryption_public_key_bytes = Path(enc_pub_path).read_bytes()
         signature_public_key_bytes = Path(sign_pub_path).read_bytes()
@@ -1780,28 +1815,14 @@ class ClientCryptoService:
             signature_public_key_bytes
         )
 
-    def load_server_public_keys_from_files(
-            self,
-            enc_pub_filename="server_enc_dec_pub.pem",
-            sign_pub_filename="server_sign_verify_pub.pem"
-    ):
-        enc_pub_path = BASE_DIR / enc_pub_filename
-        sign_pub_path = BASE_DIR / sign_pub_filename
-
-        encryption_public_key_bytes = enc_pub_path.read_bytes()
-        signature_public_key_bytes = sign_pub_path.read_bytes()
-
-        self.load_server_public_keys(
-            encryption_public_key_bytes,
-            signature_public_key_bytes
-        )
-
+    # stores the server's public keys inside ClientCryptoService
     def load_server_public_keys(self, encryption_public_key_bytes, signature_public_key_bytes):
         self.server_encryption_public_keys = encryption_public_key_bytes
         self.server_signature_verification_public_keys = signature_public_key_bytes
         self.crypto_readiness_status = True
 
-
+    # registration-related role
+    # derived two password-based values
     def derive_enrollment_values_from_password(self,password):
         password_bytes = password.encode("utf-8")
         reversed_password_bytes = password[::-1].encode("utf-8")
@@ -1813,7 +1834,8 @@ class ClientCryptoService:
             "password_hash":password_hash,
             "reversed_password_hash":reversed_password_hash
         }
-
+    # server-response verification role
+    # verifies the server's digital signature on a registration response
     def verify_registration_response_signature(self, response_message, server_public_key_bytes):
         if response_message is None:
             return False
@@ -1845,6 +1867,8 @@ class ClientCryptoService:
         except (ValueError, TypeError):
             return False
 
+    # authenticated-related role
+    # derives HMAC key
     def derive_authentication_key_from_password(self,password):
         if password is None or password == "":
             return None
@@ -1852,6 +1876,7 @@ class ClientCryptoService:
         password_hash = hashlib.sha3_512(password_bytes).digest()
         hmac_key = password_hash[32:]
         return hmac_key
+    # derives the AES and IV needed to decrypt the server's protected authenticated result
     def derive_response_decryption_material_from_password(self,password):
         reversed_password = password[::-1]
         reversed_password_bytes = reversed_password.encode("utf-8")
@@ -1862,7 +1887,7 @@ class ClientCryptoService:
             "response_decryption_key":response_decryption_key,
             "response_decryption_iv":response_decryption_iv,
         }
-
+    # encrypts the client's registration information before sending it to the server
     def encrypt_registration_request(self, registration_payload):
         if registration_payload is None:
             return None
@@ -1890,6 +1915,8 @@ class ClientCryptoService:
         except Exception:
             return None
 
+    # SecureMessage role
+    # encrypting the outgoing message using AES-CBC
     def encrypt_secure_message(self,message,aes_key,iv):
         if message is None:
             return None
@@ -1912,16 +1939,19 @@ class ClientCryptoService:
         except Exception:
             return None
 
-
+    # generate HMAC value for a message
     def compute_integrity_value(self,message_bytes,integrity_key):
         if message_bytes is None or integrity_key is None:
             return None
         return hmac.new(integrity_key,message_bytes,hashlib.sha3_512).digest()
 
+    # compares the received integrity value with an expected value
     def verify_integrity_value(self,value,expected_value):
         if value is None or expected_value is None:
             return False
         return hmac.compare_digest(value, expected_value)
+
+    # verifies the server's digital signature on an authenticated result message
     def verify_digital_signature(self,authentication_result_message,server_public_key_bytes):
         if authentication_result_message is None:
             return False
@@ -1937,6 +1967,7 @@ class ClientCryptoService:
         except(ValueError,TypeError):
             return False
 
+    # decrypts the protected authentication result received from the server
     def decrypt_protected_response(self,authentication_result_message,derived_material):
         #decrypt AES-CBC encrypted authenticated result
         if authentication_result_message is None:
@@ -1956,7 +1987,7 @@ class ClientCryptoService:
         except Exception:
             return None
 
-
+    # decrypts the incoming message after passing HMAC verification
     def decrypt_incoming_message(self,message,aes_key,iv):
         if message is None:
             return None
@@ -1988,7 +2019,12 @@ class ClientCryptoService:
 
 
 # =========================================
-# 5. Runtime State / Observability
+# 5. Runtime State / Observability Layer
+# =========================================
+
+# =========================================
+# its role is store, validate, and report the client's connection
+# configuration to the server (configuration manager)
 # =========================================
 class ConnectionSettingsManager:
     def __init__(self):
@@ -1998,6 +2034,8 @@ class ConnectionSettingsManager:
         self.readiness_for_registration = False
         self.readiness_for_authentication = False
         self.readiness_for_reconnect = False
+    # returns the current connection settings as a data container
+    # named ConnectionSettings
     def load_current_connection_settings(self):
         return ConnectionSettings(
             server_ip = self.server_ip,
@@ -2008,7 +2046,7 @@ class ConnectionSettingsManager:
             readiness_for_registration= self.readiness_for_registration,
 
         )
-
+    # checks whether the IP and port are valid or not
     def  validate_connection_settings(self):
         if self.server_ip == "":
             self.configuration_valid = False
@@ -2023,20 +2061,21 @@ class ConnectionSettingsManager:
         self.configuration_valid = True
         return True
 
-
+    #stores a new IP and Port
     def save_connection_settings(self,server_ip, server_port):
         self.server_ip = server_ip
         self.server_port  = server_port
         self.validate_connection_settings()
         self.determine_connection_readiness()
 
+    # update the current stored server IP and port
     def update_connection_settings(self,server_ip,server_port):
         self.server_ip = server_ip
         self.server_port = server_port
         self.validate_connection_settings()
         self.determine_connection_readiness()
 
-
+    # returns the current connections settings as a ConnectionSettings data container
     def  get_current_connection_settings(self):
         return ConnectionSettings(
             server_ip = self.server_ip,
@@ -2046,6 +2085,7 @@ class ConnectionSettingsManager:
             readiness_for_authentication = self.readiness_for_authentication,
             readiness_for_reconnect= self.readiness_for_reconnect,
         )
+    # determines whether the client is ready to perform a workflow
     def determine_connection_readiness(self):
         if self.configuration_valid:
             self.readiness_for_registration = True
@@ -2058,9 +2098,16 @@ class ConnectionSettingsManager:
         return False
 
 
+# =========================================
+# it tracks the current session state of the
+# the client. It maintains the client's current
+# operational state including whether the client
+# connected to the server, successfully authenticated,
+# and so
+# =========================================
 class ClientSessionManager:
     def __init__(self):
-        self.connected = False
+        self.connected = False #the client has an active session with the server
         self.authenticated = False
         self.channel_ready = False
         self.channel_unavailable = False
@@ -2068,31 +2115,36 @@ class ClientSessionManager:
         self.receive_ready = False
         self.current_username = None
         self.current_server_endpoint_summary = None
+    #when the connection, authentication, and channel readiness changes, this function calls
     def _refresh_readiness(self):
         self.send_ready = self.connected and self.authenticated and self.channel_ready
         self.receive_ready = self.connected and self.authenticated and self.channel_ready
-
+    #returns whether client connected to the server or not
     def get_connection_state(self):
         return self.connected
+    # update the connection state
     def set_connection_state(self,value):
         self.connected = value
         self._refresh_readiness()
-
+    # returns whether the clien is authenticated or not
     def get_authentication_state(self):
         return self.authenticated
+    # updates the authentication set
     def set_authentication_state(self,value):
         self.authenticated = value
         self._refresh_readiness()
-
+    # updates the channel is ready
     def set_channel_readiness(self,value):
         self.channel_ready = value
         self.channel_unavailable = not value
         self._refresh_readiness()
-
+    # returns whether the client is allowed to send
     def check_send_readiness(self):
         return self.send_ready
+    # returns whether the client is allowed to process and receive
     def check_receive_readiness(self):
         return self.receive_ready
+    # returns a dictionary containing the entire client session data
     def get_overall_session_state(self):
         return {
             "connected":self.connected,
@@ -2104,6 +2156,7 @@ class ClientSessionManager:
             "current_username":self.current_username,
             "current_server_endpoint_summary":self.current_server_endpoint_summary,
         }
+    # resets the client session to the initial inactive state
     def reset_session_state(self):
         self.connected = False
         self.authenticated = False
@@ -2113,8 +2166,16 @@ class ClientSessionManager:
         self.receive_ready = False
         self.current_username = None
         self.current_server_endpoint_summary = None
+
+    # reserved for further
     def notify_state_change(self):
         pass
+
+
+# =========================================
+# its role is acting as temporary in-memory
+# storage component
+# =========================================
 
 class ChannelKeyStore:
     def __init__(self):
@@ -2122,12 +2183,13 @@ class ChannelKeyStore:
         self.iv = None
         self.hmac_key = None
         self.keys_loaded = False
+    # stores the channel key material received from the server
     def store_channel_keys(self,key_set):
         self.aes_key = key_set.aes_key
         self.iv = key_set.iv
         self.hmac_key = key_set.hmac_key
         self.keys_loaded =  key_set.keys_loaded
-
+    # returns the channel key material as a ChannelKeySet data container
     def retrieve_channel_keys(self):#output from this method
         if not self.keys_loaded:
             return None
@@ -2138,9 +2200,10 @@ class ChannelKeyStore:
             keys_loaded=self.keys_loaded,
 
         )
-
+    # checks whether channel keys are currently available
     def check_key_availability(self):
         return self.keys_loaded
+    # removes all stored channel keys from the memory
     def clear_channel_keys(self):
         self.aes_key = None
         self.iv = None
