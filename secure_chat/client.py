@@ -137,6 +137,7 @@ class ClientGUI:
 
         self.app = ClientAppCoordinator()
 
+        # loading server's public key paths
         self.enc_pub_path_var = tk.StringVar(value=str(BASE_DIR / "server_enc_dec_pub.pem"))
         self.sign_pub_path_var = tk.StringVar(value=str(BASE_DIR / "server_sign_verify_pub.pem"))
 
@@ -152,9 +153,7 @@ class ClientGUI:
         main = ttk.Frame(self.root, padding=10)
         main.pack(fill="both", expand=True)
 
-        # -----------------------------
-        # Top status row
-        # -----------------------------
+        ######## Top bar section ##########
         top_bar = ttk.Frame(main)
         top_bar.pack(fill="x", pady=(0, 8))
 
@@ -163,9 +162,8 @@ class ClientGUI:
         self.status_var = tk.StringVar(value="Status: disconnected / not logged in")
         ttk.Label(top_bar, textvariable=self.status_var).pack(side="right")
 
-        # =================================================
-        # Server Public Keys
-        # =================================================
+
+        ########   public keys  #############
         keys_frame = ttk.LabelFrame(main, text="Server Public Keys", padding=12)
         keys_frame.pack(fill="x", pady=(0, 10))
 
@@ -181,9 +179,8 @@ class ClientGUI:
 
         keys_frame.columnconfigure(1, weight=1)
 
-        # =================================================
-        # Enrollment Section
-        # =================================================
+
+        ######## enrollment section ##########
         enroll_frame = ttk.LabelFrame(main, text="Enrollment", padding=12)
         enroll_frame.pack(fill="x", pady=(0, 10))
 
@@ -237,9 +234,8 @@ class ClientGUI:
         signup_bar.grid(row=1, column=0, columnspan=2, sticky="e", pady=(15, 0))
         ttk.Button(signup_bar, text="Sign up", command=self.sign_up).pack(side="right")
 
-        # =================================================
-        # Login / Chat Section
-        # =================================================
+
+        ######## login/chat  section ##########
         login_frame = ttk.LabelFrame(main, text="Log in", padding=12)
         login_frame.pack(fill="both", expand=True)
 
@@ -300,9 +296,10 @@ class ClientGUI:
 
         ttk.Button(action_row, text="Log out", command=self.log_out).pack(side="right")
         ttk.Button(action_row, text="log in", command=self.log_in).pack(side="right", padx=(8, 0))
-    # =====================================================
-    # Utility methods
-    # =====================================================
+
+    ####################################################
+    ####### client controllers #########################
+    ####################################################
     def set_status(self, text):
         self.status_var.set(f"Status: {text}")
 
@@ -318,9 +315,7 @@ class ClientGUI:
         except ValueError:
             return None
 
-    # =====================================================
-    # Enrollment
-    # =====================================================
+
     def sign_up(self):
         server_ip = self.enroll_ip_var.get().strip()
         server_port = self.get_int_port(self.enroll_port_var.get().strip())
@@ -395,9 +390,7 @@ class ClientGUI:
         except Exception as error:
             messagebox.showerror("Registration Exception", str(error))
 
-    # =====================================================
-    # Login
-    # =====================================================
+
     def log_in(self):
         server_ip = self.login_ip_var.get().strip()
         server_port = self.get_int_port(self.login_port_var.get().strip())
@@ -494,9 +487,7 @@ class ClientGUI:
         except Exception as error:
             messagebox.showerror("Authentication Exception", str(error))
 
-    # =====================================================
-    # Send message
-    # =====================================================
+
     def send_message(self):
         plaintext = self.message_var.get().strip()
         if not plaintext:
@@ -535,9 +526,7 @@ class ClientGUI:
         except Exception as error:
             messagebox.showerror("Send Exception", str(error))
 
-    # =====================================================
-    # Log out / Disconnect
-    # =====================================================
+
     def log_out(self):
         try:
             self.polling_active = False
@@ -547,9 +536,7 @@ class ClientGUI:
         except Exception as error:
             messagebox.showerror("Disconnect Error", str(error))
 
-    # =====================================================
-    # Poll incoming messages
-    # =====================================================
+
     def poll_incoming_messages(self):
         if not self.polling_active:
             return
@@ -592,9 +579,7 @@ class ClientGUI:
         if self.polling_active:
             self.root.after(200, self.poll_incoming_messages)
 
-    # =====================================================
-    # Window close
-    # =====================================================
+
     def on_close(self):
         try:
             self.log_out()
@@ -637,56 +622,68 @@ class ClientGUI:
         if path:
             self.sign_pub_path_var.set(path)
 
+
+
 # =========================================
 # 2. Application / Workflow Logic Layer
 # =========================================
 
 # =========================================
-#
-#
+# Central coordinator of the client application
+# main responsibilities:
+# 1.creating workflow components
+# 2.dependency wiring rule
 # =========================================
 class ClientAppCoordinator:
     def __init__(self):
-        self.active_workflow=None
-        self.pending_user_action=None
-        self.current_view_context=None
+        self.active_workflow=None # stores the workflow currently being used
+        self.pending_user_action=None # stores the name of an action waiting to be executed
+        self.current_view_context=None # stores which UI mode is active
 
+        # creating workflow components
+
+        # handles the signup workflow
         self.registration_controller = RegistrationController()
-        self.authentication_controller = AuthenticationController()
 
+        self.authentication_controller = AuthenticationController()
         self.client_connection_manager = ClientConnectionManager()
         self.client_session_manager = ClientSessionManager()
         self.disconnect_controller = DisconnectController()
         self.client_crypto_service = ClientCryptoService()
         self.channel_key_store = ChannelKeyStore()
         self.secure_message_sender = SecureMessageSender()
+        self.incoming_message_processor = IncomingMessageProcessor()
+        self.connection_settings_manager = ConnectionSettingsManager()
+
+        # dependency wiring rule
+
+        # this gives secure message sender access the channel keys
         self.secure_message_sender.channel_key_store = self.channel_key_store
 
-        self.incoming_message_processor = IncomingMessageProcessor()
         self.incoming_message_processor.channel_key_store = self.channel_key_store
         self.incoming_message_processor.client_session_manager = self.client_session_manager
         self.incoming_message_processor.client_crypto_service = self.client_crypto_service
-
-        self.connection_settings_manager = ConnectionSettingsManager()
-
-
         self.authentication_controller.channel_key_store = self.channel_key_store
         self.authentication_controller.client_session_manager = self.client_session_manager
 
-
+    # activates the connection configuration workflow
     def start_connection_configuration(self):
         self.active_workflow = self.connection_settings_manager
         self.current_view_context = "connection_configuration_mode"
         self.pending_user_action = None
         return self.connection_settings_manager.get_current_connection_settings()
+
+    # this method activates the registration workflow
     def start_registration_workflow(self):
         self.active_workflow = self.registration_controller
         self.current_view_context = "registration-mode"
         self.pending_user_action = None
+    # activates the authentication workflow
     def start_authentication_workflow(self):
         self.active_workflow = self.authentication_controller
         self.current_view_context = "authentication-mode"
         self.pending_user_action = None
+    # activates the send message sending workflow
     def start_secure_send_workflow(self):
         self.active_workflow = self.secure_message_sender
         self.current_view_context = "secure_send_mode"
@@ -699,11 +696,14 @@ class ClientAppCoordinator:
         pass
     def open_security_alert_view(self):
         pass
+    # starts the disconnect workflow and delegates to
+    # DisconnectController
     def request_disconnect(self):
         return self.disconnect_controller.start_disconnect(
             self.client_connection_manager,
             self.client_session_manager
         )
+    # routes a pending user action to the currently active workflow
     def route_user_action_to_target_workflow(self):
         if self.active_workflow is None:
             self.pending_user_action = None
@@ -757,15 +757,6 @@ class ClientAppCoordinator:
                 )
             return False
         return False
-
-
-
-
-
-
-
-
-
 
 # =========================================
 # manages the client-side enrollment workflow
