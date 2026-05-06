@@ -768,17 +768,15 @@ class ClientAppCoordinator:
 
 
 # =========================================
-#
-#
+# manages the client-side enrollment workflow
 # =========================================
-
-
 class RegistrationController:
     def __init__(self):
-        self.pending_registration_input = None
-        self.registration_in_progress = False
-        self.last_registration_result = None
+        self.pending_registration_input = None # stores the current registration input /server ip server port and so.
+        self.registration_in_progress = False # indicates whether a registration workflow is currently active
+        self.last_registration_result = None # stores the latest registration result
         self.last_registration_error = None
+    # begins the registration workflow
     def start_registration(self,server_ip, server_port, username, password,selected_channel):
         self.pending_registration_input = RegistrationInput(
             server_ip = server_ip,
@@ -790,7 +788,7 @@ class RegistrationController:
         self.registration_in_progress = True
         self.last_registration_result = None
         self.last_registration_error = None
-
+    # checks whether registration input is valid or not
     def validate_registration_input(self):
         if self.pending_registration_input is None:
             self.last_registration_error = "No registration input provided"
@@ -807,7 +805,7 @@ class RegistrationController:
 
         return True
 
-
+    # converts the raw registration input into a secure registration payload
     def prepare_registration_payload(self,client_crypto_service):
         if self.pending_registration_input is None:
             self.last_registration_error = "No registration input valid"
@@ -821,9 +819,9 @@ class RegistrationController:
             reversed_password_hash=derived_values["reversed_password_hash"],
             selected_channel=self.pending_registration_input.selected_channel
 
-
         )
         return payload
+    # creates and sends the registration request
     def submit_registration_request(self,client_crypto_service, client_connection_manager):
         if not self.validate_registration_input():
             return None
@@ -839,6 +837,7 @@ class RegistrationController:
         client_connection_manager.send_registration_request(request_message)
         return request_message
 
+    # the method processes the server's registration response
     def handle_registration_response(self, response_message, client_crypto_service):
         if response_message is None:
             self.last_registration_error = "No Registration Response"
@@ -877,6 +876,7 @@ class RegistrationController:
         self.registration_in_progress = False
         return False
 
+    # finalize registration after a successful server response
     def complete_registration(self):
         if self.last_registration_result is None:
             self.last_registration_error = "Registration result is missing"
@@ -890,7 +890,7 @@ class RegistrationController:
         self.registration_in_progress = False
         self.last_registration_error = None
         return True
-
+    # prepares the controller for another registration attempt after a failed registration
     def retry_registration(self):
         if self.pending_registration_input is None:
             self.last_registration_error = "No registration input available for retry"
@@ -908,6 +908,7 @@ class RegistrationController:
         self.last_registration_result = None
         self.last_registration_error = None
         return True
+    # cancels the registration workflow
     def abort_registration(self):
         self.pending_registration_input = None
         self.registration_in_progress = False
@@ -924,16 +925,17 @@ class RegistrationController:
 
 
 # =========================================
-#
+# Manage the client-side authentication workflow
 # =========================================
 class AuthenticationController:
     def __init__(self):
-        self.pending_username = None
-        self.pending_authentication_input = None
-        self.authentication_in_progress = False
-        self.pending_challenge = None
-        self.last_authentication_result = None
-        self.last_authentication_error = None
+        self.pending_username = None # stores the username currently being authenticated
+        self.pending_authentication_input = None # stores the user's login input /username and password
+        self.authentication_in_progress = False # is authentication workflow is currently active
+        self.pending_challenge = None # stores the random challenge received from the server
+        self.last_authentication_result = None # stores the authentication result
+        self.last_authentication_error = None # stores the error
+    # starting authentication process
     def start_authentication(self,username,password):
         self.pending_username = username
         self.pending_authentication_input = AuthenticationInput(
@@ -944,7 +946,7 @@ class AuthenticationController:
         self.pending_challenge = None
         self.last_authentication_result = None
         self.last_authentication_error = None
-
+    # checks whether the user's login information is valid or not
     def validate_authentication_input(self):
         if self.pending_authentication_input is None:
             self.last_authentication_error = "No authentication input provided"
@@ -957,7 +959,7 @@ class AuthenticationController:
             return False
         return True
 
-
+    # creates the firs authentication process message
     def request_authentication(self):
         if not self.validate_authentication_input():
             return None
@@ -968,7 +970,7 @@ class AuthenticationController:
             message_type= MessageType.AUTH_REQ,
             username=self.pending_authentication_input.username
         )
-
+    # handles the server's random challenge
     def handle_authentication_challenge(self,authentication_challenge_message,client_crypto_service):
         self.last_authentication_error = None
         if authentication_challenge_message is None:
@@ -1000,9 +1002,7 @@ class AuthenticationController:
             message_type=MessageType.AUTH_RESP,
             hmac_response=hmac_response
         )
-
-
-
+    # process the server's final authentication result
     def handle_authentication_result(self,authentication_result_message,client_crypto_service):
         if authentication_result_message is None:
             self.last_authentication_error = "Authentication result message is missing"
@@ -1099,7 +1099,7 @@ class AuthenticationController:
         self.last_authentication_error = None
         return True
 
-
+    # finalizing the authentication workflow
     def complete_authentication(self):
         if self.last_authentication_result is None:
             self.last_authentication_error = "Authentication result is missing"
@@ -1114,7 +1114,7 @@ class AuthenticationController:
         self.authentication_in_progress = False
         self.last_authentication_error = None
         return True
-
+    # prepares the controller for another authentication attempt after failure
     def retry_authentication(self):
         if self.pending_authentication_input is None:
             self.last_authentication_error = "No authentication input available for entry"
@@ -1136,7 +1136,7 @@ class AuthenticationController:
         return True
 
 
-
+    # cancels the authentication workflow completely
     def abort_authentication(self):
         self.pending_username = None
         self.pending_authentication_input = None
