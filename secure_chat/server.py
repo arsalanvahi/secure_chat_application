@@ -621,6 +621,7 @@ class ServerGUI:
         self.root.minsize(780, 600)
 
         self.server_running = False
+        # creates a shared tread-safe object. other threads check this in order to synchronize their works
         self.stop_event = threading.Event()
         self.accept_thread = None
         self.connection_threads = []
@@ -635,11 +636,14 @@ class ServerGUI:
         self.authentication_service = None
         self.server_session_manager = None
 
-
+        #two fields to save the address of the files in the string format
         self.enc_pair_path_var = tk.StringVar(value=str(BASE_DIR / "server_enc_dec_pub_prv.pem"))
         self.sign_pair_path_var = tk.StringVar(value=str(BASE_DIR / "server_sign_verify_prv.pem"))
 
         self.build_ui() #construct UI
+
+        # when the user clicks the windows close button, call this instead of
+        # closing immediately
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
     # =====================================================
     # UI BUILD
