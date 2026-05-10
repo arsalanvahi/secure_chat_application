@@ -582,6 +582,7 @@ def deserialize_message(payload:bytes):
 def send_framed(sock,payload:bytes):
     if payload is None:
         return False
+    # create  a four byte header from payload in big endian format
     header = struct.pack("!I",len(payload))
     sock.sendall(header+payload)
     return True
@@ -656,7 +657,7 @@ class ServerGUI:
         ######## Top bar section ##########
 
         top_bar = ttk.Frame(main)
-        top_bar.pack(fill="x", pady=(0, 8))
+        top_bar.pack(fill="x", pady=(0, 8))  #x is horizontal
 
         ttk.Label(top_bar, text="Chat Server", font=("Arial", 11, "bold")).pack(side="left")
 
@@ -728,18 +729,18 @@ class ServerGUI:
         self.notebook = ttk.Notebook(log_frame)
         self.notebook.pack(fill="both", expand=True)
 
-        self.log_boxes = {}
-        for channel in ChannelName:
+        self.log_boxes = {} #A dictionary for storing log text boxes
+        for channel in ChannelName:  #add tabs for each channel
             tab = ttk.Frame(self.notebook)
             self.notebook.add(tab, text=channel.value)
 
-            box = scrolledtext.ScrolledText(tab, wrap="word", state="disabled")
+            box = scrolledtext.ScrolledText(tab, wrap="word", state="disabled") #put a text container inside each tab
             box.pack(fill="both", expand=True)
 
-            self.log_boxes[channel.value] = box
+            self.log_boxes[channel.value] = box    #stores the container named box inside the related channel
 
     # writes text into the correct channel log box
-    def log(self, text, channel=None):
+    def log(self, text, channel=None): # channel = None means channel is optional
         if channel and channel in self.log_boxes:
             box = self.log_boxes[channel]
         else:
@@ -748,13 +749,18 @@ class ServerGUI:
 
         if box:
             box.configure(state="normal")
-            box.insert("end", text + "\n")
-            box.see("end")
+            box.insert("end", text + "\n") #inserts the log message at the end of the text box
+            box.see("end") #scrolls the textbox to the button
             box.configure(state="disabled")
+
+    ####################################################
+    ####### Server controls ############################
+    ####################################################
 
     #updates the staus label
     def set_status(self, text):
         self.status_var.set(f"Status: {text}")
+
 
     #switches between start server and stop server
     def toggle_server(self):
@@ -763,9 +769,7 @@ class ServerGUI:
         else:
             self.start_server()
 
-    ####################################################
-    ####### Server controls ############################
-    ####################################################
+
     def start_server(self):
         if self.server_running:
             messagebox.showinfo("Server", "Server already running.")
@@ -912,6 +916,7 @@ class ServerGUI:
     def accept_loop(self):
         while not self.stop_event.is_set():
             try:
+                #sock is a communication channel and address is (add,port)
                 sock, addr = self.server_transport_manager.listening_socket.accept()
             except (socket.timeout, OSError):
                 continue
@@ -2246,7 +2251,6 @@ class ServerLifecycleManager:
             self.lifecycle_phase = "failed"
             self.startup_in_progress = False
             self.last_lifecycle_error = str(error)
-
             self.last_lifecycle_result = LifecycleResult(
                 success=False,
                 message="Runtime initialization failed",
@@ -2341,7 +2345,6 @@ class ServerLifecycleManager:
             self.startup_in_progress = False
             self.shutdown_in_progress = False
             self.last_lifecycle_error = None
-
             self.last_lifecycle_result = LifecycleResult(
                 success=True,
                 message="server is running",
@@ -2354,7 +2357,6 @@ class ServerLifecycleManager:
             self.lifecycle_phase = "failed"
             self.startup_in_progress = False
             self.last_lifecycle_error = str(error)
-
             self.last_lifecycle_result = LifecycleResult(
                 success=False,
                 message="failed to enter running state",

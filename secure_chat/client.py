@@ -337,7 +337,7 @@ class ClientGUI:
 
 
         try:
-            # Connect if needed
+            # check connectio state
             if not self.app.client_connection_manager.report_connection_state():
                 connected = self.app.client_connection_manager.connect_to_server(server_ip, server_port)
                 if not connected:
@@ -360,7 +360,7 @@ class ClientGUI:
                 error_text = self.app.registration_controller.last_registration_error or "Invalid registration input."
                 messagebox.showerror("Registration Error", error_text)
                 return
-
+            # preparing registration payload
             request_message = self.app.registration_controller.submit_registration_request(
                 self.app.client_crypto_service,
                 self.app.client_connection_manager
@@ -369,6 +369,7 @@ class ClientGUI:
                 messagebox.showerror("Registration Error", "Failed to create registration request.")
                 return
 
+            # receive application response message from server
             response_message = self.app.client_connection_manager.receive_application_message()
             if response_message is None or response_message.message_type != MessageType.REG_RES:
                 messagebox.showerror("Registration Error", "No valid registration response received.")
@@ -820,6 +821,7 @@ class RegistrationController:
         if payload is None:
             return None
         encrypted_payload = client_crypto_service.encrypt_registration_request(payload)
+        # a protocol message send to the server
         request_message = RegistrationRequestMessage(
             message_type=MessageType.REG_REQ,
             encrypted_payload=encrypted_payload
@@ -1805,7 +1807,7 @@ class ClientCryptoService:
         self.server_signature_verification_public_keys = None
         self.crypto_readiness_status = False
 
-    # loads the server's public keys from the user-selected path
+    # loads the server's public keys bytes from the user-selected path
     def load_server_public_keys_from_paths(self, enc_pub_path, sign_pub_path):
         encryption_public_key_bytes = Path(enc_pub_path).read_bytes()
         signature_public_key_bytes = Path(sign_pub_path).read_bytes()
