@@ -7,6 +7,11 @@
 #4-Security Layer
 #5-Runtime State/observability Layer
 ####################################################
+
+###########################################
+# for multiple clients, do not create new file and copy this code there, instead,
+# just there is a capability "run multiple instances"
+##################################################
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext,filedialog
 
